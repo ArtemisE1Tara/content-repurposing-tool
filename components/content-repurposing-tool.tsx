@@ -1,0 +1,503 @@
+"use client"
+
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Loader2, AlertCircle, Twitter, Instagram, Linkedin, Mail, Sparkles, Settings, LinkIcon, SmilePlus } from "lucide-react"
+import { generateContent, fetchArticleContent } from "@/lib/generate-content"
+import { countWords } from "@/lib/utils"
+import OutputCard from "@/components/output-card"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Separator } from "@/components/ui/separator"
+import { ModeToggle } from "@/components/mode-toggle"
+import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+
+// Define tone options
+const toneOptions = [
+  { value: "professional", label: "Professional" },
+  { value: "casual", label: "Casual" },
+  { value: "humorous", label: "Humorous" },
+  { value: "enthusiastic", label: "Enthusiastic" },
+  { value: "informative", label: "Informative" },
+]
+
+// Default character limits
+const DEFAULT_LIMITS = {
+  input: 2000, // words
+  twitter: 500,
+  instagram: 500,
+  linkedin: 500,
+  email: 500,
+}
+
+export default function Main() {
+  const [content, setContent] = useState("")
+  const [articleUrl, setArticleUrl] = useState("")
+  const [outputs, setOutputs] = useState<{
+    twitter: string
+    instagram: string
+    linkedin: string
+    email: string
+  }>({
+    twitter: "",
+    instagram: "",
+    linkedin: "",
+    email: "",
+  })
+  const [selectedPlatforms, setSelectedPlatforms] = useState({
+    twitter: false,
+    instagram: false,
+    linkedin: false,
+    email: false,
+  })
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isFetchingArticle, setIsFetchingArticle] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("twitter")
+  const [selectedTone, setSelectedTone] = useState("professional")
+  const [customInstructions, setCustomInstructions] = useState("")
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
+  const [useEmojis, setUseEmojis] = useState(false)
+  const [limits, setLimits] = useState({ ...DEFAULT_LIMITS })
+
+  const wordCount = countWords(content)
+  const isOverLimit = wordCount > limits.input
+
+  // Check if at least one platform is selected
+  const hasSelectedPlatform = Object.values(selectedPlatforms).some((value) => value)
+
+  // Get the first selected platform for default tab
+  const getFirstSelectedPlatform = () => {
+    const platforms = ["twitter", "instagram", "linkedin", "email"]
+    return platforms.find((platform) => selectedPlatforms[platform as keyof typeof selectedPlatforms]) || "twitter"
+  }
+
+  // Handle limit change
+  const handleLimitChange = (platform: keyof typeof limits, value: string) => {
+    const numValue = Number.parseInt(value)
+    if (!isNaN(numValue) && numValue > 0) {
+      setLimits((prev) => ({
+        ...prev,
+        [platform]: numValue,
+      }))
+    }
+  }
+
+  // Fetch article content
+  async function handleFetchArticle() {
+    if (!articleUrl.trim()) {
+      setError("Please enter a valid URL")
+      return
+    }
+
+    setError(null)
+    setIsFetchingArticle(true)
+
+    try {
+      const articleContent = await fetchArticleContent(articleUrl)
+      setContent(articleContent)
+    } catch (err) {
+      console.error("Article fetch error:", err)
+      setError("Failed to fetch article content. Please check the URL and try again.")
+    } finally {
+      setIsFetchingArticle(false)
+    }
+  }
+
+  async function handleGenerate() {
+    if (!content.trim()) {
+      setError("Please enter some content to repurpose")
+      return
+    }
+
+    if (isOverLimit) {
+      setError(`Content exceeds the ${limits.input} word limit`)
+      return
+    }
+
+    if (!hasSelectedPlatform) {
+      setError("Please select at least one platform")
+      return
+    }
+
+    setError(null)
+    setIsGenerating(true)
+
+    try {
+      const generatedContent = await generateContent(
+        content,
+        selectedPlatforms,
+        selectedTone,
+        customInstructions,
+        limits,
+        useEmojis
+      )
+      setOutputs((prevOutputs) => ({
+        ...prevOutputs,
+        ...generatedContent,
+      }))
+
+      // Set active tab to the first selected platform
+      setActiveTab(getFirstSelectedPlatform())
+    } catch (err) {
+      console.error("Generation error:", err)
+      setError("Failed to generate content. Please check your API key and try again.")
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // Handle platform selection
+  const handlePlatformChange = (platform: keyof typeof selectedPlatforms) => {
+    setSelectedPlatforms((prev) => ({
+      ...prev,
+      [platform]: !prev[platform],
+    }))
+  }
+
+  // Reset limits to defaults
+  const resetLimits = () => {
+    setLimits({ ...DEFAULT_LIMITS })
+  }
+
+  // Get generated platforms
+  const generatedPlatforms = Object.entries(outputs)
+    .filter(([platform, content]) => content && selectedPlatforms[platform as keyof typeof selectedPlatforms])
+    .map(([platform]) => platform)
+
+  return (
+    <div className="space-y-6 mb-10">
+      {/* Enhanced Hero Section */}
+      <div className="rounded-lg border-2 bg-card p-6 shadow-sm">
+        <div className="flex justify-between items-center gap-10">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+            Contentful.AI
+            </h1>
+            <p className="text-muted-foreground">
+            Condense media into platform-optimized social media captions and email snippets
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="flex h-3 w-3 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-sm text-muted-foreground mr-2">Powered by GPT-4o</span>
+            <ModeToggle />
+          </div>
+        </div>
+      </div>
+
+      <Card className="border-2">
+        <CardHeader>
+          <CardTitle>Input</CardTitle>
+          <CardDescription>Paste an article or fetch from a URL (max {limits.input} words)</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <Input
+                placeholder="Enter article URL"
+                value={articleUrl}
+                onChange={(e) => setArticleUrl(e.target.value)}
+                className="w-full"
+              />
+            </div>
+            <Button
+              onClick={handleFetchArticle}
+              disabled={isFetchingArticle || !articleUrl.trim()}
+              className="whitespace-nowrap"
+            >
+              {isFetchingArticle ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Fetching...
+                </>
+              ) : (
+                <>
+                  <LinkIcon className="mr-2 h-4 w-4" />
+                  Fetch
+                </>
+              )}
+            </Button>
+          </div>
+
+          <Textarea
+            placeholder="Paste from clipboard here..."
+            className="min-h-[200px] resize-none"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+          />
+          <div className={`text-sm ${isOverLimit ? "text-destructive" : "text-muted-foreground"}`}>
+            {wordCount} / {limits.input} words
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="border-2">
+          <CardHeader>
+            <CardTitle>Target Platforms</CardTitle>
+            <CardDescription>Select platforms to generate captions for</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              <Button
+                variant={selectedPlatforms.twitter ? "default" : "outline"}
+                className={`flex items-center justify-center gap-2 h-20 ${
+                  selectedPlatforms.twitter ? "bg-primary text-primary-foreground" : ""
+                }`}
+                onClick={() => handlePlatformChange("twitter")}
+              >
+                <Twitter
+                  className={`h-6 w-6 ${selectedPlatforms.twitter ? "text-primary-foreground" : "text-primary"}`}
+                />
+                <span>Twitter</span>
+              </Button>
+
+              <Button
+                variant={selectedPlatforms.instagram ? "default" : "outline"}
+                className={`flex items-center justify-center gap-2 h-20 ${
+                  selectedPlatforms.instagram ? "bg-primary text-primary-foreground" : ""
+                }`}
+                onClick={() => handlePlatformChange("instagram")}
+              >
+                <Instagram
+                  className={`h-6 w-6 ${selectedPlatforms.instagram ? "text-primary-foreground" : "text-primary"}`}
+                />
+                <span>Instagram</span>
+              </Button>
+
+              <Button
+                variant={selectedPlatforms.linkedin ? "default" : "outline"}
+                className={`flex items-center justify-center gap-2 h-20 ${
+                  selectedPlatforms.linkedin ? "bg-primary text-primary-foreground" : ""
+                }`}
+                onClick={() => handlePlatformChange("linkedin")}
+              >
+                <Linkedin
+                  className={`h-6 w-6 ${selectedPlatforms.linkedin ? "text-primary-foreground" : "text-primary"}`}
+                />
+                <span>LinkedIn</span>
+              </Button>
+
+              <Button
+                variant={selectedPlatforms.email ? "default" : "outline"}
+                className={`flex items-center justify-center gap-2 h-20 ${
+                  selectedPlatforms.email ? "bg-primary text-primary-foreground" : ""
+                }`}
+                onClick={() => handlePlatformChange("email")}
+              >
+                <Mail className={`h-6 w-6 ${selectedPlatforms.email ? "text-primary-foreground" : "text-primary"}`} />
+                <span>Email</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-2">
+          <CardHeader>
+            <CardTitle>Style</CardTitle>
+            <CardDescription>Choose how your media should sound</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup value={selectedTone} onValueChange={setSelectedTone} className="space-y-3">
+              {toneOptions.map((tone) => (
+                <div key={tone.value} className="flex items-center space-x-2">
+                  <RadioGroupItem value={tone.value} id={tone.value} />
+                  <Label htmlFor={tone.value}>{tone.label}</Label>
+                </div>
+              ))}
+            </RadioGroup>
+
+            <Separator className="my-4" />
+
+            <div className="flex items-center space-x-2 mb-4">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowAdvancedOptions(!showAdvancedOptions)} 
+                className="flex items-center space-x-1"
+              >
+                <Settings className="h-4 w-4" />
+                <span>Options</span>
+              </Button>
+            </div>
+
+            {showAdvancedOptions && (
+              <div className="space-y-4 mt-4">
+                {/* Replace emoji toggle with button */}
+                <div className="space-y-2">
+                  <Button
+                    variant={useEmojis ? "default" : "outline"}
+                    className={`flex items-center justify-center gap-2 w-full h-10 ${
+                      useEmojis ? "bg-primary text-primary-foreground" : ""
+                    }`}
+                    onClick={() => setUseEmojis(!useEmojis)}
+                  >
+                    <SmilePlus
+                      className={`h-5 w-5 ${useEmojis ? "text-primary-foreground" : "text-primary"}`}
+                    />
+                    <span>
+                      {selectedTone === "professional" && "Use Professional Emojis"}
+                      {selectedTone === "casual" && "Use Casual Emojis"}
+                      {selectedTone === "humorous" && "Use Fun Emojis"}
+                      {selectedTone === "enthusiastic" && "Use Enthusiastic Emojis"}
+                      {selectedTone === "informative" && "Use Informative Emojis"}
+                    </span>
+                  </Button>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Character Limits</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="input-limit">Input (words)</Label>
+                      <Input
+                        id="input-limit"
+                        type="number"
+                        min="1"
+                        value={limits.input}
+                        onChange={(e) => handleLimitChange("input", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="twitter-limit">Twitter</Label>
+                      <Input
+                        id="twitter-limit"
+                        type="number"
+                        min="1"
+                        value={limits.twitter}
+                        onChange={(e) => handleLimitChange("twitter", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="instagram-limit">Instagram</Label>
+                      <Input
+                        id="instagram-limit"
+                        type="number"
+                        min="1"
+                        value={limits.instagram}
+                        onChange={(e) => handleLimitChange("instagram", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="linkedin-limit">LinkedIn</Label>
+                      <Input
+                        id="linkedin-limit"
+                        type="number"
+                        min="1"
+                        value={limits.linkedin}
+                        onChange={(e) => handleLimitChange("linkedin", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email-limit">Email</Label>
+                      <Input
+                        id="email-limit"
+                        type="number"
+                        min="1"
+                        value={limits.email}
+                        onChange={(e) => handleLimitChange("email", e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button variant="outline" size="sm" onClick={resetLimits}>
+                        Reset to Defaults
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="custom-instructions">Custom Instructions</Label>
+                  <Textarea
+                    id="custom-instructions"
+                    placeholder="Add specific instructions (e.g., include specific keywords, focus on certain aspects)"
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    className="resize-none"
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Button
+        onClick={handleGenerate}
+        disabled={isGenerating || isOverLimit || !content.trim() || !hasSelectedPlatform}
+        className="w-full py-6 text-lg"
+      >
+        {isGenerating ? (
+          <>
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            Generating Content...
+          </>
+        ) : (
+          <>
+            <Sparkles className="mr-2 h-5 w-5" />
+            Generate 
+          </>
+        )}
+      </Button>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {generatedPlatforms.length > 0 && (
+        <Card className="border-2">
+          <CardHeader>
+            <CardTitle>Generated Content</CardTitle>
+            <CardDescription>Platform-optimized versions of your content</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid grid-cols-4 mb-4">
+                {selectedPlatforms.twitter && outputs.twitter && <TabsTrigger value="twitter">Twitter</TabsTrigger>}
+                {selectedPlatforms.instagram && outputs.instagram && (
+                  <TabsTrigger value="instagram">Instagram</TabsTrigger>
+                )}
+                {selectedPlatforms.linkedin && outputs.linkedin && <TabsTrigger value="linkedin">LinkedIn</TabsTrigger>}
+                {selectedPlatforms.email && outputs.email && <TabsTrigger value="email">Email</TabsTrigger>}
+              </TabsList>
+
+              {selectedPlatforms.twitter && outputs.twitter && (
+                <TabsContent value="twitter">
+                  <OutputCard title="Twitter Caption" content={outputs.twitter} maxLength={limits.twitter} />
+                </TabsContent>
+              )}
+
+              {selectedPlatforms.instagram && outputs.instagram && (
+                <TabsContent value="instagram">
+                  <OutputCard title="Instagram Caption" content={outputs.instagram} maxLength={limits.instagram} />
+                </TabsContent>
+              )}
+
+              {selectedPlatforms.linkedin && outputs.linkedin && (
+                <TabsContent value="linkedin">
+                  <OutputCard title="LinkedIn Post" content={outputs.linkedin} maxLength={limits.linkedin} />
+                </TabsContent>
+              )}
+
+              {selectedPlatforms.email && outputs.email && (
+                <TabsContent value="email">
+                  <OutputCard title="Email Snippet" content={outputs.email} maxLength={limits.email} />
+                </TabsContent>
+              )}
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
