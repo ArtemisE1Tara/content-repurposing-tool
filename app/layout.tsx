@@ -1,6 +1,7 @@
 import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 import { Inter as FontSans } from "next/font/google"
+import { ClerkProvider } from '@clerk/nextjs'
 
 // Load Inter as the main font
 export const fontSans = FontSans({
@@ -19,11 +20,13 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head />
-      <body className={`min-h-screen antialiased ${fontSans.variable}`}>
-        <ThemeProvider>{children}</ThemeProvider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <head />
+        <body className={`antialiased ${fontSans.variable}`}>
+          <ThemeProvider>{children}</ThemeProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

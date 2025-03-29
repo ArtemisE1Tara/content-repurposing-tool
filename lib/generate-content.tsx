@@ -2,6 +2,7 @@
 
 import { extract } from "@extractus/article-extractor"
 import { OpenAI } from "openai"
+import { trackGeneration, getUserUsageStats } from "@/lib/memberships"
 
 type PlatformSelection = {
   twitter: boolean
@@ -140,6 +141,20 @@ export async function generateContent(
   limits?: LimitsType,
   useEmojis = false,
 ): Promise<Record<string, string>> {
+  // Check if user has reached their generation limit
+  try {
+    const stats = await getUserUsageStats();
+    if (stats.isOverLimit) {
+      throw new Error("You've reached your monthly generation limit. Please upgrade your plan to continue generating content.");
+    }
+  } catch (error: any) {
+    if (error.message.includes("upgrade your plan")) {
+      throw error;
+    }
+    // If there's another error with stats, continue without checking limits
+    console.error("Error checking usage limits:", error);
+  }
+
   const result: Record<string, string> = {}
   const prompts: Record<string, string> = {}
 
@@ -307,6 +322,39 @@ export async function generateContent(
 
         const generatedContent = response.choices[0]?.message?.content || ""
         result[platform] = generatedContent
+        
+        console.log(`Generated content for ${platform}, length: ${generatedContent.length}`);
+        
+        // Track this generation in the database with the content
+        if (!isPreviewOrMissingAPIKey) {
+          try {
+            console.log(`Storing generation for ${platform} in database...`);
+            // Try to track generation and handle any errors
+            const trackResult = await trackGeneration(platform, generatedContent.length, generatedContent);
+            
+            if (trackResult && typeof trackResult === 'object' && 'id' in trackResult) {
+              console.log(`✅ Store success for ${platform}, ID: ${(trackResult as {id: string | number}).id}`);
+            } else {
+              console.log(`❌ Store may have failed for ${platform}, no result returned`);
+              
+              // Try to diagnose the issue - run a direct test after a short delay
+              setTimeout(async () => {
+                try {
+                  const testResponse = await fetch('/api/test-db');
+                  const testResult = await testResponse.json();
+                  console.log('Database diagnostic test result:', testResult);
+                } catch (testErr) {
+                  console.error('Failed to run diagnostic test:', testErr);
+                }
+              }, 500);
+            }
+          } catch (trackError) {
+            console.error(`Error tracking generation for ${platform}:`, trackError);
+            // Don't throw here, just log the error and continue
+          }
+        } else {
+          console.log('Skipping database storage (preview mode or missing API key)');
+        }
       } catch (error) {
         console.error(`Error generating content for ${platform}:`, error)
         result[platform] = `Could not generate content for ${platform}. Please try again.`

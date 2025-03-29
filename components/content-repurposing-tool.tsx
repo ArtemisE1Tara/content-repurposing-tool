@@ -13,9 +13,9 @@ import OutputCard from "@/components/output-card"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
-import { ModeToggle } from "@/components/mode-toggle"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { UsageDisplay } from "@/components/usage-display"
 
 // Define tone options
 const toneOptions = [
@@ -35,7 +35,12 @@ const DEFAULT_LIMITS = {
   email: 500,
 }
 
-export default function Main() {
+// Add onContentGenerated to the component props
+interface MainProps {
+  onContentGenerated?: () => void;
+}
+
+export default function Main({ onContentGenerated }: MainProps) {
   const [content, setContent] = useState("")
   const [articleUrl, setArticleUrl] = useState("")
   const [outputs, setOutputs] = useState<{
@@ -64,6 +69,7 @@ export default function Main() {
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
   const [useEmojis, setUseEmojis] = useState(false)
   const [limits, setLimits] = useState({ ...DEFAULT_LIMITS })
+  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0)
 
   const wordCount = countWords(content)
   const isOverLimit = wordCount > limits.input
@@ -144,6 +150,14 @@ export default function Main() {
 
       // Set active tab to the first selected platform
       setActiveTab(getFirstSelectedPlatform())
+
+      // Call the onContentGenerated callback to trigger history refresh
+      if (onContentGenerated) {
+        onContentGenerated();
+      }
+
+      // Trigger history list refresh
+      setHistoryRefreshTrigger(prev => prev + 1)
     } catch (err) {
       console.error("Generation error:", err)
       setError("Failed to generate content. Please check your API key and try again.")
@@ -172,24 +186,15 @@ export default function Main() {
 
   return (
     <div className="space-y-6 mb-10">
-      {/* Enhanced Hero Section */}
-      <div className="rounded-lg border-2 bg-card p-6 shadow-sm">
-        <div className="flex justify-between items-center gap-10">
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-            Contentful.AI
-            </h1>
-            <p className="text-muted-foreground">
-            Condense media into platform-optimized social media captions and email snippets
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="flex h-3 w-3 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-sm text-muted-foreground mr-2">Powered by GPT-4o</span>
-            <ModeToggle />
-          </div>
-        </div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold">Content Generator</h1>
+        <p className="text-muted-foreground mt-1">
+          Condense media into platform-optimized social media captions and email snippets
+        </p>
       </div>
+      
+      {/* Add usage display */}
+      <UsageDisplay />
 
       <Card className="border-2">
         <CardHeader>
@@ -500,4 +505,9 @@ export default function Main() {
     </div>
   )
 }
+
+// Export the history refresh trigger so the sidebar can access it
+export const useHistoryRefresh = () => {
+  return { historyRefreshTrigger: useState(0)[0], setHistoryRefreshTrigger: useState(0)[1] };
+};
 
