@@ -37,7 +37,7 @@ export default async function MembershipPage() {
                 <ul className="space-y-2">
                   <li className="flex items-start">
                     <Check className="h-5 w-5 mr-2 text-primary shrink-0" />
-                    <span>{tier.monthly_generation_limit} generations per month</span>
+                    <span>{tier.daily_generation_limit} generations per day</span>
                   </li>
                   <li className="flex items-start">
                     <Check className="h-5 w-5 mr-2 text-primary shrink-0" />

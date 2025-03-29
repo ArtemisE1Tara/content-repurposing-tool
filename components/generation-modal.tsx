@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Copy, X } from 'lucide-react';
+import { Copy } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -48,11 +48,7 @@ export function GenerationModal({ generation, open, onClose }: GenerationModalPr
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle className="pr-10">{generation.title || 'Generated Content'}</DialogTitle>
-          <Button variant="ghost" size="icon" className="absolute right-4 top-4" onClick={onClose}>
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </Button>
+          <DialogTitle>{generation.title || 'Generated Content'}</DialogTitle>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Badge className={getPlatformColor(generation.platform)}>
               {generation.platform}
@@ -62,7 +58,7 @@ export function GenerationModal({ generation, open, onClose }: GenerationModalPr
         </DialogHeader>
         
         <div className="flex-1 overflow-auto py-4">
-          <div className="space-y-4">
+          <div className="space-y-7">
             <div className="flex justify-end">
               <Button
                 variant={showMarkdown ? "default" : "outline"}

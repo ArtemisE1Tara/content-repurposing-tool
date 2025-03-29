@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// Initial subscription tiers data
+// Initial subscription tiers data with daily limits
 const initialTiers = [
   {
     name: 'Free',
-    monthly_generation_limit: 10,
+    daily_generation_limit: 3,  // Changed from monthly_generation_limit
     platform_limit: 2,
     max_character_count: 500,
     price_monthly: 0,
@@ -14,7 +14,7 @@ const initialTiers = [
   },
   {
     name: 'Basic',
-    monthly_generation_limit: 50,
+    daily_generation_limit: 10,  // Changed from monthly_generation_limit
     platform_limit: 3,
     max_character_count: 1000,
     price_monthly: 999,
@@ -23,7 +23,7 @@ const initialTiers = [
   },
   {
     name: 'Pro',
-    monthly_generation_limit: 500,
+    daily_generation_limit: 50,  // Changed from monthly_generation_limit
     platform_limit: 4,
     max_character_count: 3000,
     price_monthly: 1999,
@@ -48,7 +48,7 @@ export async function GET() {
         CREATE TABLE IF NOT EXISTS subscription_tiers (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           name TEXT NOT NULL,
-          monthly_generation_limit INTEGER NOT NULL,
+          daily_generation_limit INTEGER NOT NULL,  -- Changed from monthly_generation_limit
           platform_limit INTEGER NOT NULL,
           max_character_count INTEGER NOT NULL,
           price_monthly INTEGER NOT NULL,

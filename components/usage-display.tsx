@@ -91,8 +91,8 @@ export function UsageDisplay() {
       <CardHeader>
         <CardTitle>Your Usage</CardTitle>
         <CardDescription>
-          {usage.subscription.tier.name} Plan - {usage.generationsThisMonth} of{" "}
-          {usage.limit} generations used this month
+          {usage.subscription.tier.name} Plan - {usage.generationsThisDay} of{" "}
+          {usage.dailyLimit} generations used today
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -101,17 +101,26 @@ export function UsageDisplay() {
           className={`h-2 ${usage.isOverLimit ? "[&>div]:bg-destructive" : ""}`}
         />
         
-        <p className="text-sm mt-2 text-muted-foreground">
-          {usage.isOverLimit 
-            ? "You've reached your monthly generation limit" 
-            : `${usage.remainingGenerations} generations remaining this month`}
+        <div className="flex justify-between mt-2">
+          <p className="text-sm text-muted-foreground">
+            {usage.isOverLimit 
+              ? "You've reached your daily generation limit" 
+              : `${usage.remainingGenerationsToday} generations remaining today`}
+          </p>
+          <p className="text-sm font-medium">
+            {usage.generationsThisDay}/{usage.dailyLimit}
+          </p>
+        </div>
+        
+        <p className="mt-4 text-xs text-muted-foreground text-right">
+          Resets daily at midnight
         </p>
         
         {usage.isOverLimit && (
           <Alert variant="destructive" className="mt-4">
             <XCircle className="h-4 w-4" />
             <AlertDescription>
-              You've reached your monthly generation limit. Upgrade your plan to continue generating content.
+              You've reached your daily generation limit. Upgrade your plan for higher limits or wait until tomorrow.
             </AlertDescription>
           </Alert>
         )}

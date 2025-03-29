@@ -71,7 +71,7 @@ export interface Database {
         Row: {
           id: string
           name: string
-          monthly_generation_limit: number
+          daily_generation_limit: number
           platform_limit: number
           max_character_count: number
           price_monthly: number
@@ -81,7 +81,7 @@ export interface Database {
         Insert: {
           id?: string
           name: string
-          monthly_generation_limit: number
+          daily_generation_limit: number
           platform_limit: number
           max_character_count: number
           price_monthly: number
@@ -91,7 +91,7 @@ export interface Database {
         Update: {
           id?: string
           name?: string
-          monthly_generation_limit?: number
+          daily_generation_limit?: number
           platform_limit?: number
           max_character_count?: number
           price_monthly?: number

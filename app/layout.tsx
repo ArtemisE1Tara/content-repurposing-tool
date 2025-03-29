@@ -11,7 +11,7 @@ export const fontSans = FontSans({
 
 export const metadata = {
   title: "Contentful.AI",
-  description: "Transform media for multiple platforms with AI",
+  description: "Condense already existing articles into platform-optimized social media captions and email snippets using the latest AI technology.",
 }
 
 export default function RootLayout({

@@ -225,7 +225,7 @@ export async function getGenerationById(id: string) {
   return data;
 }
 
-// Get usage statistics
+// Simplify usage stats to only use daily metrics
 export async function getUserUsageStats() {
   const user = await getCurrentUser();
   const subscription = await getUserSubscription();
@@ -234,28 +234,36 @@ export async function getUserUsageStats() {
     throw new Error("User subscription not found");
   }
   
-  // Get first day of current month
+  // Get start of today (midnight)
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   
-  // Count generations for current month
+  // Count generations for current day
   const { data: generations, error } = await supabase
     .from('generations')
     .select('*', { count: 'exact' })
     .eq('user_id', user.id)
-    .gte('created_at', firstDayOfMonth);
+    .gte('created_at', startOfDay);
     
   if (error) {
     console.error('Error counting generations:', error);
     throw new Error("Failed to get usage statistics");
   }
+
+  // Use daily limit directly from the subscription tier
+  const dailyLimit = subscription.tier.daily_generation_limit;
+  
+  const generationsThisDay = generations.length;
+  const percentUsed = Math.min(100, Math.round((generationsThisDay / dailyLimit) * 100));
+  const remainingGenerationsToday = Math.max(0, dailyLimit - generationsThisDay);
+  const isOverLimit = generationsThisDay >= dailyLimit;
   
   return {
-    generationsThisMonth: generations.length,
-    limit: subscription.tier.monthly_generation_limit,
-    percentUsed: Math.round((generations.length / subscription.tier.monthly_generation_limit) * 100),
-    remainingGenerations: Math.max(0, subscription.tier.monthly_generation_limit - generations.length),
-    isOverLimit: generations.length >= subscription.tier.monthly_generation_limit,
+    generationsThisDay,
+    dailyLimit,
+    percentUsed,
+    remainingGenerationsToday,
+    isOverLimit,
     subscription
   };
 }

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useContext } from 'react';
 import { HistoryItem } from './history-item';
-import { Loader2, Clock, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { Loader2, Clock, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { getUserGenerationHistory } from '@/lib/memberships';
 import { cn } from '@/lib/utils';
+import { Badge } from './ui/badge';
+import { GenerationContext } from './content-repurposing-tool';
 
 export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: boolean, refreshTrigger?: number }) {
   const [history, setHistory] = useState<any[]>([]);
@@ -14,11 +16,14 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
+  
+  // Access the latest generation from context
+  const { latestGeneration } = useContext(GenerationContext);
 
   const fetchHistory = async (isRefresh = false) => {
     try {
       isRefresh ? setRefreshing(true) : setLoading(true);
-      const data = await getUserGenerationHistory(15);
+      const data = await getUserGenerationHistory(20);
       setHistory(data);
       setError(null);
     } catch (err: any) {
@@ -42,74 +47,107 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
     }
   }, [refreshTrigger]);
 
+  // When we get a new generation, add it to the history immediately
+  useEffect(() => {
+    if (latestGeneration && !history.some(item => 
+      // Check if it's a duplicate by comparing content or ID
+      (latestGeneration.isTemporary && item.content === latestGeneration.content) || 
+      item.id === latestGeneration.id
+    )) {
+      // Add the new generation to the top of the history list
+      setHistory(prev => [latestGeneration, ...prev]);
+      
+      // If this was a temporary item, refresh to get the real data after a delay
+      if (latestGeneration.isTemporary) {
+        setTimeout(() => {
+          fetchHistory(true);
+        }, 1500);
+      }
+    }
+  }, [latestGeneration]);
+
   const hasHistory = history.length > 0;
 
+  // Handle collapsed state with minimal UI
   if (collapsed) {
     if (!hasHistory) return null;
     
     return (
-      <div className="mb-3">
-        <div className="px-3 py-2 mb-1 border-t">
-          <Clock className="h-4 w-4 text-muted-foreground" />
+      <div className="space-y-1 px-1 h-full">
+        <div className="flex items-center justify-center h-6">
+          <History className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
-        {history.slice(0, 5).map(item => (
-          <HistoryItem
-            key={item.id}
-            id={item.id}
-            platform={item.platform}
-            title={item.title || `${item.platform} generation`}
-            snippet={item.content_snippet || ''}
-            created_at={item.created_at}
-            collapsed={true}
-          />
-        ))}
+        <div className="space-y-1 pt-1 overflow-hidden relative h-[calc(100%-2rem)]">
+          <div className="h-full">
+            {history.slice(0, 7).map(item => (
+              <HistoryItem
+                key={item.id}
+                id={item.id}
+                platform={item.platform}
+                title={item.title || `${item.platform} generation`}
+                snippet={item.content_snippet || ''}
+                created_at={item.created_at}
+                collapsed={true}
+              />
+            ))}
+          </div>
+          {history.length > 7 && (
+            <div className="flex justify-center">
+              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
+                +{history.length - 7}
+              </Badge>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
+  // Loading state
   if (loading) {
     return (
-      <div className="px-3 py-2 flex items-center text-xs text-muted-foreground">
+      <div className="px-2 py-3 flex items-center text-xs text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin mr-2" />
-        Loading history...
+        <span>Loading history...</span>
       </div>
     );
   }
 
+  // Error state
   if (error) {
     return (
-      <div className="px-3 py-2 text-xs text-destructive">
+      <div className="px-2 py-2 text-xs text-destructive">
         {error}
       </div>
     );
   }
 
+  // No history state
   if (!hasHistory) {
     return (
-      <div className="px-3 py-2 text-xs text-muted-foreground">
-        No generation history yet.
+      <div className="px-2 py-2 text-xs text-muted-foreground space-y-1">
+        <p>No history yet.</p>
+        <p className="text-[10px]">Generate snippets to see your history here.</p>
       </div>
     );
   }
 
+  // Regular history list with items
   return (
-    <div className="mb-3">
-      <div className="flex items-center justify-between mb-1">
+    <div className="space-y-2 h-full flex flex-col">
+      <div className="flex items-center justify-between px-1 flex-shrink-0">
         <Button
           variant="ghost"
           size="sm"
-          className="px-3 text-left justify-start flex-grow"
+          className="px-2 text-left justify-start h-7 gap-1.5 text-xs"
           onClick={() => setExpanded(!expanded)}
         >
-          <div className="flex items-center">
-            <Clock className="h-4 w-4 mr-2" />
-            <span className="text-sm">Recent Generations</span>
-          </div>
-          {expanded ? (
-            <ChevronDown className="h-4 w-4 ml-1" />
-          ) : (
-            <ChevronRight className="h-4 w-4 ml-1" />
-          )}
+          <Clock className="h-3.5 w-3.5" />
+          <span className="font-medium">History</span>
+          {expanded ? 
+            <ChevronDown className="h-3.5 w-3.5 ml-auto" /> : 
+            <ChevronRight className="h-3.5 w-3.5 ml-auto" />
+          }
         </Button>
         
         <Button 
@@ -119,25 +157,37 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
           onClick={() => fetchHistory(true)}
           disabled={refreshing}
         >
-          <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
+          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           <span className="sr-only">Refresh</span>
         </Button>
+      {history.length > 0 && (
+        <Badge variant="secondary" className="ml-5 text-[11px] px-1.5 py-0 h-auto inline-flex">
+          {history.length} item{history.length !== 1 ? 's' : ''}
+        </Badge>
+      )}
       </div>
 
       {expanded && (
-        <ScrollArea className={cn("pr-4", history.length > 5 ? "max-h-60" : "")}>
-          {history.map(item => (
-            <HistoryItem
-              key={item.id}
-              id={item.id}
-              platform={item.platform}
-              title={item.title || `${item.platform} generation`}
-              snippet={item.content_snippet || ''}
-              created_at={item.created_at}
-              collapsed={false}
-            />
-          ))}
-        </ScrollArea>
+        <div className="relative flex-grow overflow-hidden">
+          <ScrollArea className="h-full pr-2">
+            <div className="space-y-1 pb-8">
+              {history.map(item => (
+                <HistoryItem
+                  key={item.id}
+                  id={item.id}
+                  platform={item.platform}
+                  title={item.title || `${item.platform} generation`}
+                  snippet={item.content_snippet || ''}
+                  created_at={item.created_at}
+                  collapsed={false}
+                  isTemporary={item.isTemporary}
+                />
+              ))}
+            </div>
+          </ScrollArea>
+          {/* Fade effect at the bottom */}
+          <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+        </div>
       )}
     </div>
   );

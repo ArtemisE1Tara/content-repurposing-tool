@@ -22,7 +22,7 @@ export function AppContent({ userId }: AppContentProps) {
       <main className="flex-1 overflow-y-auto p-6">
         <div className="max-w-6xl mx-auto">
           {/* Pass the refreshHistory function to Main if needed */}
-          <Main onContentGenerated={refreshHistory} />
+          
         </div>
       </main>
     </div>

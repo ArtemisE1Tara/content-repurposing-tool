@@ -140,12 +140,12 @@ export async function generateContent(
   customInstructions = "",
   limits?: LimitsType,
   useEmojis = false,
-): Promise<Record<string, string>> {
+): Promise<Record<string, string | any>> {
   // Check if user has reached their generation limit
   try {
     const stats = await getUserUsageStats();
     if (stats.isOverLimit) {
-      throw new Error("You've reached your monthly generation limit. Please upgrade your plan to continue generating content.");
+      throw new Error("You've reached your daily generation limit. Please upgrade your plan to continue generating content.");
     }
   } catch (error: any) {
     if (error.message.includes("upgrade your plan")) {
@@ -155,7 +155,7 @@ export async function generateContent(
     console.error("Error checking usage limits:", error);
   }
 
-  const result: Record<string, string> = {}
+  const result: Record<string, string | any> = {}
   const prompts: Record<string, string> = {}
 
   // Build tone instruction
@@ -329,11 +329,17 @@ export async function generateContent(
         if (!isPreviewOrMissingAPIKey) {
           try {
             console.log(`Storing generation for ${platform} in database...`);
-            // Try to track generation and handle any errors
+            // Track generation and return result for instant display
             const trackResult = await trackGeneration(platform, generatedContent.length, generatedContent);
             
             if (trackResult && typeof trackResult === 'object' && 'id' in trackResult) {
               console.log(`✅ Store success for ${platform}, ID: ${(trackResult as {id: string | number}).id}`);
+              
+              // Store the database record ID with the generation
+              // This will be useful for immediate updating of the history list
+              if (!result._meta) result._meta = {};
+              if (!result._meta.dbRecords) result._meta.dbRecords = {};
+              result._meta.dbRecords[platform] = trackResult;
             } else {
               console.log(`❌ Store may have failed for ${platform}, no result returned`);
               
