@@ -4,7 +4,7 @@ import { Inter as FontSans } from "next/font/google"
 import { ClerkProvider } from '@clerk/nextjs'
 
 // Load Inter as the main font
-export const fontSans = FontSans({
+const fontSans = FontSans({
   subsets: ["latin"],
   variable: "--font-sans",
 })
