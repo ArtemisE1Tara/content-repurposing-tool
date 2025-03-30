@@ -1,1 +1,1 @@
-
+trailingSlash: true
