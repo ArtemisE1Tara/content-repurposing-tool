@@ -72,16 +72,23 @@ export async function POST(req: NextRequest) {
     // 4. Process the event - simplified for reliability
     console.log(`[WEBHOOK] Processing event: ${event.type}`);
     
-    // 5. Always return 200 quickly to Stripe - critical for webhooks
-    // This acknowledges receipt even if processing fails
-    const response = NextResponse.json({ received: true }, { status: 200 });
-    
-    // 6. Process different event types after sending response
-    // These errors will be logged but won't affect the response
+    // Process events directly instead of using setTimeout in a serverless environment
+    // setTimeout can lead to function termination before processing completes
     try {
       if (event.type === 'checkout.session.completed') {
         const session = event.data.object as Stripe.Checkout.Session;
+        console.log(`[WEBHOOK] Processing checkout session immediately: ${session.id}`);
+        
+        // Process directly and return response after processing
         await handleCheckoutSessionCompleted(session);
+        console.log(`[WEBHOOK] Successfully processed checkout session: ${session.id}`);
+        
+        return NextResponse.json({ 
+          received: true, 
+          eventId: event.id, 
+          type: event.type,
+          message: 'Webhook processed successfully' 
+        }, { status: 200 });
       } 
       else if (event.type === 'customer.subscription.created' || 
                event.type === 'customer.subscription.updated') {
@@ -98,7 +105,7 @@ export async function POST(req: NextRequest) {
       console.error(err.stack);
     }
     
-    return response;
+    return NextResponse.json({ received: true }, { status: 200 });
   } catch (err: any) {
     // Catch-all error handler
     console.error(`[WEBHOOK] Unexpected error: ${err.message}`);
@@ -108,79 +115,134 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
-  // Get customer and subscription details
-  const customerId = session.customer as string;
-  const subscriptionId = session.subscription as string;
-
-  if (!customerId || !subscriptionId) {
-    console.error('Missing customer or subscription ID in session', session);
-    return;
-  }
-
-  // Get user ID from customer metadata
-  const customer = await stripe.customers.retrieve(customerId);
-  if ('deleted' in customer && customer.deleted) {
-    console.error('Customer has been deleted', customer);
-    return;
-  }
+  console.log(`[CHECKOUT] Starting processing for session: ${session.id}`);
   
-  const userId = (customer as Stripe.Customer).metadata.userId;
+  try {
+    // Get customer and subscription details
+    const customerId = session.customer as string;
+    const subscriptionId = session.subscription as string;
 
-  if (!userId) {
-    console.error('No userId found in customer metadata', customer);
-    return;
-  }
+    console.log(`[CHECKOUT] Customer ID: ${customerId}, Subscription ID: ${subscriptionId}`);
 
-  // Get subscription details to determine tier
-  const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
-  const priceId = stripeSubscription.items.data[0].price.id;
-  const tierName = getTierFromPriceId(priceId);
-  
-  // Get or create the tier in the database
-  const tierData = await getOrCreateTier(tierName);
+    if (!customerId || !subscriptionId) {
+      console.error('[CHECKOUT] Missing customer or subscription ID in session', session);
+      return;
+    }
 
-  // Check if subscription record already exists
-  const { data: existingSubscription } = await supabaseAdmin
-    .from('subscriptions')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
+    // Get user ID from session metadata directly if available
+    // This is more reliable than retrieving customer metadata
+    let userId = session.metadata?.userId;
+    console.log(`[CHECKOUT] User ID from session metadata: ${userId}`);
 
-  if (existingSubscription) {
-    // Update existing subscription
-    await supabaseAdmin
+    // If userId not in session metadata, try getting it from customer metadata
+    if (!userId) {
+      console.log(`[CHECKOUT] No userId in session metadata, retrieving customer: ${customerId}`);
+      const customer = await stripe.customers.retrieve(customerId);
+      
+      if ('deleted' in customer && customer.deleted) {
+        console.error('[CHECKOUT] Customer has been deleted', customer);
+        return;
+      }
+      
+      userId = (customer as Stripe.Customer).metadata?.userId;
+      console.log(`[CHECKOUT] User ID from customer metadata: ${userId}`);
+    }
+
+    if (!userId) {
+      console.error('[CHECKOUT] No userId found in metadata', { session, customerId });
+      return;
+    }
+
+    // Get subscription details to determine tier
+    console.log(`[CHECKOUT] Retrieving subscription details: ${subscriptionId}`);
+    const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
+    
+    if (!stripeSubscription?.items?.data?.[0]?.price?.id) {
+      console.error('[CHECKOUT] Invalid subscription structure', stripeSubscription);
+      return;
+    }
+    
+    const priceId = stripeSubscription.items.data[0].price.id;
+    console.log(`[CHECKOUT] Price ID from subscription: ${priceId}`);
+    
+    const tierName = getTierFromPriceId(priceId);
+    console.log(`[CHECKOUT] Mapped tier name: ${tierName}`);
+    
+    // Get or create the tier in the database
+    console.log(`[CHECKOUT] Getting or creating tier: ${tierName}`);
+    const tierData = await getOrCreateTier(tierName);
+    console.log(`[CHECKOUT] Tier data retrieved/created:`, tierData);
+
+    // Check if subscription record already exists
+    console.log(`[CHECKOUT] Checking for existing subscription for user: ${userId}`);
+    const { data: existingSubscription, error: subQueryError } = await supabaseAdmin
       .from('subscriptions')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+      
+    if (subQueryError) {
+      console.error('[CHECKOUT] Error checking for existing subscription:', subQueryError);
+      return;
+    }
+
+    console.log(`[CHECKOUT] Existing subscription:`, existingSubscription);
+
+    let updateResult;
+    if (existingSubscription) {
+      // Update existing subscription
+      console.log(`[CHECKOUT] Updating existing subscription: ${existingSubscription.id}`);
+      updateResult = await supabaseAdmin
+        .from('subscriptions')
+        .update({
+          tier_id: tierData.id,
+          stripe_subscription_id: subscriptionId,
+          status: 'active',
+          current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingSubscription.id);
+        
+      console.log(`[CHECKOUT] Subscription update result:`, updateResult);
+    } else {
+      // Create new subscription record
+      console.log(`[CHECKOUT] Creating new subscription record`);
+      updateResult = await supabaseAdmin
+        .from('subscriptions')
+        .insert({
+          user_id: userId,
+          tier_id: tierData.id,
+          stripe_subscription_id: subscriptionId,
+          status: 'active',
+          current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+        
+      console.log(`[CHECKOUT] Subscription insert result:`, updateResult);
+    }
+
+    // Update user's subscription tier for quick reference
+    console.log(`[CHECKOUT] Updating user's subscription tier to: ${tierName}`);
+    const userUpdateResult = await supabaseAdmin
+      .from('users')
       .update({
-        tier_id: tierData.id,
-        stripe_subscription_id: subscriptionId,
-        status: 'active',
-        current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
+        subscription_tier: tierName,
         updated_at: new Date().toISOString()
       })
-      .eq('id', existingSubscription.id);
-  } else {
-    // Create new subscription record
-    await supabaseAdmin
-      .from('subscriptions')
-      .insert({
-        user_id: userId,
-        tier_id: tierData.id,
-        stripe_subscription_id: subscriptionId,
-        status: 'active',
-        current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
+      .eq('id', userId);
+      
+    console.log(`[CHECKOUT] User update result:`, userUpdateResult);
+    
+    console.log(`[CHECKOUT] Successfully completed processing for session: ${session.id}`);
+  } catch (error) {
+    console.error(`[CHECKOUT] Error processing checkout session: ${session.id}`, error);
+    if (error instanceof Error) {
+      console.error(error.stack);
+    } else {
+      console.error('Unknown error:', error);
+    }
   }
-
-  // Update user's subscription tier for quick reference
-  await supabaseAdmin
-    .from('users')
-    .update({
-      subscription_tier: tierName,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
 }
 
 async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
