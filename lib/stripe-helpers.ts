@@ -58,15 +58,21 @@ export const getStripePriceId = (tier: SubscriptionTier): string => {
 };
 
 // Map Stripe price IDs back to subscription tiers
-export const getTierFromPriceId = (priceId: string): SubscriptionTier => {
-  switch (priceId) {
-    case STRIPE_PRICE_IDS.BASIC:
-      return 'basic';
-    case STRIPE_PRICE_IDS.PRO:
-      return 'pro';
-    case STRIPE_PRICE_IDS.PREMIUM:
-      return 'premium';
-    default:
-      return 'free';
-  }
-};
+export function getTierFromPriceId(priceId: string): string {
+  // Add more detailed logging to track this mapping
+  console.log(`[STRIPE] Mapping price ID: ${priceId} to tier`);
+  
+  // Map Stripe price IDs to subscription tier names
+  const priceTierMap: Record<string, string> = {
+    'price_1R87MOB0MIXSPfNYh962nsxo': 'pro',      // Pro monthly
+    'price_1R87MpB0MIXSPfNYnlq0cQ2U': 'pro',      // Pro yearly
+    'price_1R87N7B0MIXSPfNYTGtbNQZD': 'premium',  // Premium monthly
+    'price_1R87NXB0MIXSPfNYDlbpxIkJ': 'premium',  // Premium yearly
+    // Add any other price IDs here
+  };
+  
+  // Return the mapped tier or 'free' as default
+  const tier = priceTierMap[priceId] || 'free';
+  console.log(`[STRIPE] Mapped to tier: ${tier}`);
+  return tier;
+}
