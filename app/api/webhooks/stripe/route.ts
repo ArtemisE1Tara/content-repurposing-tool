@@ -1,135 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { headers } from 'next/headers';
 import Stripe from 'stripe';
+import { Buffer } from 'buffer';
 import { stripe } from '@/lib/stripe';
 import { getTierFromPriceId } from '@/lib/stripe-helpers';
 import { supabaseAdmin, getOrCreateTier } from '@/lib/supabase-admin';
 
-// Server-only code
-import 'server-only';
+// Special config to disable body parsing for this route
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
-// Simple synchronous webhook handler for better reliability in serverless environments
 export async function POST(req: NextRequest) {
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    console.error('Missing STRIPE_WEBHOOK_SECRET');
+    return NextResponse.json({ error: 'Webhook secret missing' }, { status: 500 });
+  }
+
   try {
-    // 1. Validate environment variables
-    if (!process.env.STRIPE_WEBHOOK_SECRET) {
-      console.error('[WEBHOOK] Missing STRIPE_WEBHOOK_SECRET');
-      return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
+    // 1. Get the raw request body as a buffer
+    const chunks = [];
+    const reader = req.body?.getReader();
+    if (!reader) {
+      return NextResponse.json({ error: 'No request body' }, { status: 400 });
     }
-    
-    if (!process.env.STRIPE_SECRET_KEY) {
-      console.error('[WEBHOOK] Missing STRIPE_SECRET_KEY');
-      return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
     }
-    
-    // 2. Get raw request data as a string WITHOUT processing
-    const rawBody = await req.text();
-    console.log('[WEBHOOK] Raw body length:', rawBody.length);
-    
-    // 3. Get Stripe signature header
-    const headersList = await headers();
-    const signature = headersList.get('stripe-signature');
-    
-    // Log all headers for debugging
-    console.log('[WEBHOOK] Headers received:', Object.fromEntries([...headersList.entries()]));
-    
+
+    const bodyBuffer = Buffer.concat(chunks);
+    const rawBody = bodyBuffer.toString('utf8');
+
+    // 2. Get the Stripe signature from headers
+    const signature = req.headers.get('stripe-signature');
     if (!signature) {
-      console.error('[WEBHOOK] No stripe-signature header found');
-      return NextResponse.json({ error: 'No signature header' }, { status: 400 });
+      console.error('No Stripe signature found in header');
+      return NextResponse.json({ error: 'No signature provided' }, { status: 400 });
     }
-    
-    // 4. Manually verify the signature instead of using stripe.webhooks.constructEvent
-    // This gives us more control over the verification process
+
+    // 3. Construct and verify the event
     let event: Stripe.Event;
     try {
-      // Log the first 100 chars of the body and signature for debugging
-      console.log('[WEBHOOK] Body preview:', rawBody.substring(0, 100));
-      console.log('[WEBHOOK] Signature:', signature);
-      console.log('[WEBHOOK] Secret starts with:', process.env.STRIPE_WEBHOOK_SECRET.substring(0, 4) + '...');
-      
-      // Try to construct the event using the raw body
       event = stripe.webhooks.constructEvent(
         rawBody,
         signature,
         process.env.STRIPE_WEBHOOK_SECRET
       );
-      
-      console.log(`[WEBHOOK] Event verified: ${event.id} (${event.type})`);
     } catch (err: any) {
-      console.error(`[WEBHOOK] Verification failed: ${err.message}`);
-      
-      // Try to parse the body ourselves for debugging
-      let parsedBody;
-      try {
-        parsedBody = JSON.parse(rawBody);
-        console.log('[WEBHOOK] Event ID from parsed body:', parsedBody.id);
-        console.log('[WEBHOOK] Event type from parsed body:', parsedBody.type);
-      } catch (parseErr) {
-        console.error('[WEBHOOK] Could not parse body as JSON:', parseErr);
-      }
-      
-      return NextResponse.json({ 
-        error: `Webhook Error: ${err.message}`,
-        bodyLength: rawBody.length
-      }, { status: 400 });
+      console.error(`Webhook signature verification failed: ${err.message}`);
+      return NextResponse.json({ error: err.message }, { status: 400 });
     }
 
-    // If we got here, the signature was verified successfully, so process the event
-    
-    // Return a 200 response immediately to prevent Stripe retries
-    const response = NextResponse.json({
-      received: true,
-      eventId: event.id,
-      type: event.type
-    }, { status: 200 });
-    
-    // Process the event after returning the response
-    // NOTE: In serverless environments, this might not complete if the function terminates
-    try {
-      if (event.type === 'checkout.session.completed') {
-        const session = event.data.object as Stripe.Checkout.Session;
-        processCheckoutSessionAsync(session)
-          .catch(error => console.error('[WEBHOOK] Async processing error:', error));
+    // 4. Return a 200 response immediately
+    console.log(`Event processed: ${event.type}`);
+
+    // 5. Process the event based on type
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      try {
+        await handleCheckoutSessionCompleted(session);
+        console.log(`Successfully processed checkout session: ${session.id}`);
+      } catch (error) {
+        console.error(`Error processing checkout session: ${error}`);
+        // Still return 200 to acknowledge receipt
       }
-      // Handle other event types similarly
-    } catch (err) {
-      console.error('[WEBHOOK] Error setting up async processing:', err);
     }
-    
-    return response;
-  } catch (err: any) {
-    console.error(`[WEBHOOK] Unexpected error: ${err.message}`);
-    console.error(err.stack || err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+
+    return NextResponse.json({ received: true }, { status: 200 });
+  } catch (err) {
+    console.error('Webhook error:', err);
+    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }
 
 // Process checkout session in a separate function for clarity
-async function processCheckoutSessionAsync(session: Stripe.Checkout.Session) {
-  console.log(`[CHECKOUT] Processing session: ${session.id}`);
-  
-  try {
-    // This function will be called asynchronously after the response is sent
-    await handleCheckoutSessionCompleted(session);
-    console.log(`[CHECKOUT] Successfully processed session: ${session.id}`);
-    
-    // Make a server-to-server request to your API to update UI state
-    await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'https://content-repurposing-tool.vercel.app'}/api/stripe/update-ui-state`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sessionId: session.id,
-        customerId: session.customer,
-        success: true
-      }),
-    });
-  } catch (error) {
-    console.error(`[CHECKOUT] Processing error:`, error);
-  }
-}
-
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
   console.log(`[CHECKOUT] Starting processing for session: ${session.id}`);
   
