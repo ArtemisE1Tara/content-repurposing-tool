@@ -6,7 +6,7 @@ import { getTierFromPriceId } from '@/lib/stripe-helpers';
 import { supabaseAdmin, getOrCreateTier } from '@/lib/supabase-admin';
 
 // Server-only code
-
+import 'server-only';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
@@ -16,11 +16,19 @@ export async function POST(req: NextRequest) {
 
   // Log the headers to inspect them
   console.log('Webhook Headers:', headers());
+  
+  // Validate required secret
+  if (!webhookSecret) {
+    console.error('Missing STRIPE_WEBHOOK_SECRET environment variable');
+    return new NextResponse('Webhook secret is not configured', { status: 500 });
+  }
 
   let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    console.log('Webhook signature verified successfully');
+    console.log(`Processing webhook event: ${event.type} with id: ${event.id}`);
   } catch (error: any) {
     console.error(`Webhook signature verification failed: ${error.message}`);
     return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
@@ -31,25 +39,31 @@ export async function POST(req: NextRequest) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
+        console.log(`Processing checkout session: ${session.id}`);
         await handleCheckoutSessionCompleted(session);
+        console.log(`Successfully processed checkout session: ${session.id}`);
         break;
       }
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
         const subscription = event.data.object as Stripe.Subscription;
+        console.log(`Processing subscription update: ${subscription.id}`);
         await handleSubscriptionUpdated(subscription);
+        console.log(`Successfully processed subscription update: ${subscription.id}`);
         break;
       }
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
+        console.log(`Processing subscription deletion: ${subscription.id}`);
         await handleSubscriptionDeleted(subscription);
+        console.log(`Successfully processed subscription deletion: ${subscription.id}`);
         break;
       }
       default:
         console.log(`Unhandled event type: ${event.type}`);
     }
 
-    return NextResponse.json({ received: true }, { status: 200 });
+    return NextResponse.json({ received: true, eventId: event.id, type: event.type }, { status: 200 });
   } catch (error) {
     console.error('Error processing webhook:', error);
     return NextResponse.json(
