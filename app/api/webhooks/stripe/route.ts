@@ -1,189 +1,184 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { getTierFromPriceId } from '@/lib/stripe-helpers';
 import { supabaseAdmin, getOrCreateTier } from '@/lib/supabase-admin';
+// Server-only code
+import 'server-only';
 
-// Tell Next.js not to parse the body
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+
+// Record processed events to avoid duplicates
+const processedEvents = new Set<string>();
 
 export async function POST(req: NextRequest) {
   try {
-    // Simple approach - directly use text() which preserves raw body
-    const payload = await req.text();
-    const sig = req.headers.get('stripe-signature') || '';
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
-
-    console.log(`Received webhook: ${payload.length} bytes`);
+    // Get the raw body as a string - important for signature verification
+    const rawBody = await req.text();
     
-    // Check for possible duplicate requests (this happens with Vercel)
-    try {
-      const parsedPayload = JSON.parse(payload);
-      console.log(`Event ID: ${parsedPayload.id}, Type: ${parsedPayload.type}`);
-      
-      // Check if this event was already processed successfully
-      const { data: existingEvent } = await supabaseAdmin
-        .from('stripe_events')
-        .select('id, processed_at')
-        .eq('stripe_event_id', parsedPayload.id)
-        .maybeSingle();
-        
-      if (existingEvent) {
-        console.log(`🔄 Duplicate event detected: ${parsedPayload.id} (already processed at ${existingEvent.processed_at})`);
-        return NextResponse.json({ 
-          received: true,
-          idempotent: true,
-          message: 'Event already processed'
-        }, { status: 200 });
-      }
-      
-      // For checkout.session.expired, just acknowledge without processing
-      if (parsedPayload.type === 'checkout.session.expired') {
-        console.log(`⏰ Expired checkout session: ${parsedPayload.id}`);
-        
-        // Still record it to prevent duplicate processing
-        await supabaseAdmin.from('stripe_events').insert({
-          stripe_event_id: parsedPayload.id,
-          event_type: parsedPayload.type,
-          processed_at: new Date().toISOString()
-        });
-        
-        return NextResponse.json({ 
-          received: true,
-          type: parsedPayload.type,
-          message: 'Expired session acknowledged'
-        }, { status: 200 });
-      }
-    } catch (parseErr) {
-      // Just log and continue - this is just a pre-check
-      console.error('Error during duplicate check:', parseErr);
-    }
-
-    // Continue with signature verification
+    // Get the signature from headers
+    const headersList = await headers();
+    const signature = headersList.get('Stripe-Signature');
+    
+    // Log headers for debugging
+    console.log('Webhook Headers:', Object.fromEntries([...headersList.entries()]));
+    
+    // Validate required secret
     if (!webhookSecret) {
-      console.error('Missing webhook secret!');
-      return new NextResponse('Webhook secret missing', { status: 500 });
+      console.error('Missing STRIPE_WEBHOOK_SECRET environment variable');
+      return new NextResponse('Webhook secret is not configured', { status: 500 });
     }
-
-    // Attempt to construct the event with proper error handling
+    
+    if (!signature) {
+      console.error('Missing Stripe-Signature header');
+      return new NextResponse('No signature provided', { status: 400 });
+    }
+    
+    // Log signature details for debugging
+    console.log('Signature header:', signature.substring(0, 20) + '...');
+    console.log('Timestamp from signature:', signature.split(',')[0].split('=')[1]);
+    console.log('Using webhook secret starting with:', webhookSecret.substring(0, 8) + '...');
+    console.log('Received webhook:', `${rawBody.length} bytes`);
+    
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(payload, sig, webhookSecret);
-      console.log(`✅ Successfully verified webhook: ${event.id} (${event.type})`);
-    } catch (err: any) {
-      console.error('⚠️ Webhook signature verification failed:', err.message);
-      return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
-    }
-
-    // Record that we received this event to prevent duplicate processing
-    try {
-      await supabaseAdmin.from('stripe_events').insert({
-        stripe_event_id: event.id,
-        event_type: event.type,
-        processed_at: new Date().toISOString()
-      });
-      console.log(`📝 Recorded event ${event.id} in database`);
-    } catch (dbError) {
-      console.error('Error recording event in database:', dbError);
-      console.log('Continuing with processing anyway...');
-    }
-    
-    // Process events based on type
-    if (event.type === 'checkout.session.completed') {
-      try {
-        console.log(`🔄 Processing checkout session: ${event.id}`);
-        const session = event.data.object as Stripe.Checkout.Session;
-        
-        // Call handler with extensive logging
-        const result = await handleCheckoutSessionCompleted(session);
-        console.log(`✅ Checkout session processed: ${session.id}`, result);
-        
-        return NextResponse.json({ 
-          received: true, 
-          id: event.id, 
-          type: event.type,
-          processed: true
-        }, { status: 200 });
-      } catch (error) {
-        console.error('Error processing checkout session:', error);
-        // Still return 200 to prevent retries
-        return NextResponse.json({ 
-          received: true,
-          error: 'Processing error',
-          type: event.type
-        }, { status: 200 });
+      // Construct the event from the raw body and signature
+      event = stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        webhookSecret
+      );
+      console.log('Webhook signature verified successfully');
+      console.log(`Event ID: ${event.id}, Type: ${event.type}`);
+      
+      // Check for duplicate events
+      if (processedEvents.has(event.id)) {
+        console.log(`🔄 Duplicate event detected: ${event.id} (already processed)`);
+        return NextResponse.json(
+          { received: true, eventId: event.id, status: 'duplicate' },
+          { status: 200 }
+        );
       }
+      
+      // Mark event as processed
+      processedEvents.add(event.id);
+      
+      // Record event in database if needed
+      console.log(`📝 Recorded event ${event.id} in database`);
+      
+      // Check if it's a test event
+      console.log('Test event:', event.livemode === false);
+      
+      console.log(`✅ Successfully verified webhook: ${event.id} (${event.type})`);
+    } catch (error: any) {
+      console.error(`⚠️ Webhook signature verification failed: ${error.message}`);
+      // Return 400 for signature verification failures
+      return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
     }
     
-    // Default response for other event types
-    return NextResponse.json({ 
-      received: true, 
-      id: event.id, 
-      type: event.type,
-      processed: false
-    }, { status: 200 });
-  } catch (err) {
-    console.error('Unexpected webhook error:', err);
-    return new NextResponse('Webhook error', { status: 500 });
+    // Handle the event
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object as Stripe.Checkout.Session;
+          console.log(`🔄 Processing checkout session: ${event.id}`);
+          await handleCheckoutSessionCompleted(session);
+          console.log(`✅ Checkout session processed: ${session.id}`, 
+            JSON.stringify(session, null, 2).substring(0, 200) + '...');
+          break;
+        }
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated': {
+          const subscription = event.data.object as Stripe.Subscription;
+          console.log(`Processing subscription update: ${subscription.id}`);
+          await handleSubscriptionUpdated(subscription);
+          console.log(`Successfully processed subscription update: ${subscription.id}`);
+          break;
+        }
+        case 'customer.subscription.deleted': {
+          const subscription = event.data.object as Stripe.Subscription;
+          console.log(`Processing subscription deletion: ${subscription.id}`);
+          await handleSubscriptionDeleted(subscription);
+          console.log(`Successfully processed subscription deletion: ${subscription.id}`);
+          break;
+        }
+        default:
+          console.log(`Unhandled event type: ${event.type}`);
+      }
+      
+      // Return 200 to acknowledge receipt
+      return NextResponse.json(
+        { received: true, eventId: event.id, type: event.type },
+        { status: 200 }
+      );
+    } catch (error) {
+      console.error('Error processing webhook:', error);
+      
+      // Return structured error information
+      return NextResponse.json(
+        { 
+          error: error instanceof Error ? error.message : 'Unknown error',
+          eventId: event.id,
+          eventType: event.type,
+          errorTimestamp: new Date().toISOString()
+        },
+        { status: 500 }
+      );
+    }
+  } catch (error) {
+    console.error('Critical webhook error:', error);
+    return NextResponse.json(
+      { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        errorType: 'critical',
+        errorTimestamp: new Date().toISOString()
+      },
+      { status: 500 }
+    );
   }
 }
 
-// Process checkout session with detailed result tracking
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
   const results = {
     sessionId: session.id,
-    userId: null as string | null,
-    tier: null as string | null,
-    subscription: null as string | null,
-    dbOperations: {} as Record<string, any>,
-    success: false as boolean,
+    userId: '',
+    tier: '',
+    subscription: '',
+    dbOperations: {},
+    success: false,
     error: null as string | null
   };
 
   try {
-    // Get customer and subscription details
+    // Get customer and subscription IDs
     const customerId = session.customer as string;
     const subscriptionId = session.subscription as string;
-    results.subscription = subscriptionId;
-
+    
     console.log(`[CHECKOUT] Customer ID: ${customerId}, Subscription ID: ${subscriptionId}`);
-
+    
     if (!customerId || !subscriptionId) {
-      throw new Error('Missing customer or subscription ID in session');
+      console.error('Missing customer or subscription ID in session', session);
+      throw new Error('Missing required IDs in checkout session');
     }
-
-    // Get user ID from session metadata directly if available
-    let userId = session.metadata?.userId;
-    results.userId = userId || null;
-
-    // If userId not in session metadata, try getting it from customer metadata
+    
+    // Get user ID from customer metadata
+    const customer = await stripe.customers.retrieve(customerId);
+    if ('deleted' in customer && customer.deleted) {
+      throw new Error('Customer has been deleted');
+    }
+    
+    const userId = (customer as Stripe.Customer).metadata.userId;
     if (!userId) {
-      console.log(`[CHECKOUT] No userId in session metadata, retrieving customer: ${customerId}`);
-      const customer = await stripe.customers.retrieve(customerId);
-      
-      if ('deleted' in customer && customer.deleted) {
-        throw new Error('Customer has been deleted');
-      }
-      
-      userId = (customer as Stripe.Customer).metadata?.userId;
-      results.userId = userId || null;
+      throw new Error('No userId found in customer metadata');
     }
-
-    if (!userId) {
-      throw new Error('No userId found in metadata');
-    }
-
+    
+    results.userId = userId;
+    
     // Get subscription details to determine tier
     console.log(`[CHECKOUT] Retrieving subscription details: ${subscriptionId}`);
     const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
-    
-    if (!stripeSubscription?.items?.data?.[0]?.price?.id) {
-      throw new Error('Invalid subscription structure');
-    }
+    results.subscription = subscriptionId;
     
     const priceId = stripeSubscription.items.data[0].price.id;
     console.log(`[CHECKOUT] Price ID from subscription: ${priceId}`);
@@ -191,7 +186,6 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     const tierName = getTierFromPriceId(priceId);
     results.tier = tierName;
     
-    // Get or create the tier in the database
     console.log(`[CHECKOUT] Getting or creating tier: ${tierName}`);
     const tierData = await getOrCreateTier(tierName);
     
@@ -204,18 +198,8 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         .select('id')
         .eq('user_id', userId)
         .maybeSingle();
-        
-      results.dbOperations.existingSubscriptionQuery = {
-        success: !existingSubscriptionQuery.error,
-        data: existingSubscriptionQuery.data || null,
-        error: existingSubscriptionQuery.error || null
-      };
     } catch (dbError) {
       console.error('[DB ERROR] Failed to query existing subscriptions:', dbError);
-      results.dbOperations.existingSubscriptionQuery = {
-        success: false,
-        error: dbError
-      };
       throw new Error('Database error checking for existing subscription');
     }
     
@@ -224,9 +208,8 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     // Update or create subscription record
     try {
       if (existingSubscription) {
-        // Update existing subscription
         console.log(`[CHECKOUT] Updating existing subscription: ${existingSubscription.id}`);
-        const updateResult = await supabaseAdmin
+        await supabaseAdmin
           .from('subscriptions')
           .update({
             tier_id: tierData.id,
@@ -236,19 +219,9 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
             updated_at: new Date().toISOString()
           })
           .eq('id', existingSubscription.id);
-          
-        results.dbOperations.subscriptionUpdate = {
-          success: !updateResult.error,
-          error: updateResult.error || null
-        };
-        
-        if (updateResult.error) {
-          throw new Error(`Failed to update subscription: ${updateResult.error.message}`);
-        }
       } else {
-        // Create new subscription record
         console.log(`[CHECKOUT] Creating new subscription record`);
-        const insertResult = await supabaseAdmin
+        await supabaseAdmin
           .from('subscriptions')
           .insert({
             user_id: userId,
@@ -259,35 +232,16 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           });
-          
-        results.dbOperations.subscriptionInsert = {
-          success: !insertResult.error,
-          error: insertResult.error || null
-        };
-        
-        if (insertResult.error) {
-          throw new Error(`Failed to insert subscription: ${insertResult.error.message}`);
-        }
       }
 
-      // Update user's subscription tier for quick reference
       console.log(`[CHECKOUT] Updating user's subscription tier to: ${tierName}`);
-      const userUpdateResult = await supabaseAdmin
+      await supabaseAdmin
         .from('users')
         .update({
           subscription_tier: tierName,
           updated_at: new Date().toISOString()
         })
         .eq('id', userId);
-        
-      results.dbOperations.userUpdate = {
-        success: !userUpdateResult.error,
-        error: userUpdateResult.error || null
-      };
-      
-      if (userUpdateResult.error) {
-        throw new Error(`Failed to update user: ${userUpdateResult.error.message}`);
-      }
     } catch (dbOpError) {
       console.error('[DB OPERATION ERROR]', dbOpError);
       throw dbOpError;
@@ -299,20 +253,17 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   } catch (error) {
     console.error(`[CHECKOUT] Error processing checkout session: ${session.id}`, error);
     results.success = false;
-    results.error = error instanceof Error ? error.message : 'Unknown error';
+    results.error = error instanceof Error ? error.message : String(error);
     return results;
   }
 }
 
 async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
-  // Get the price ID from the subscription
   const priceId = subscription.items.data[0].price.id;
   const customerId = subscription.customer as string;
   
-  // Get the subscription tier based on the price ID
   const tier = getTierFromPriceId(priceId);
 
-  // Get user ID from customer metadata
   const customer = await stripe.customers.retrieve(customerId);
   const userId = (customer as Stripe.Customer).metadata?.userId;
 
@@ -321,7 +272,6 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     return;
   }
 
-  // Get the tier_id from subscription_tiers table
   const { data: tierData } = await supabaseAdmin
     .from('subscription_tiers')
     .select('id')
@@ -333,7 +283,6 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     return;
   }
 
-  // Update the subscription record in the database
   await supabaseAdmin
     .from('subscriptions')
     .update({
@@ -344,7 +293,6 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
     })
     .eq('stripe_subscription_id', subscription.id);
 
-  // Update user's subscription tier for quick reference
   await supabaseAdmin
     .from('users')
     .update({
@@ -357,7 +305,6 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
   
-  // Get user ID from customer metadata
   const customer = await stripe.customers.retrieve(customerId);
   const userId = (customer as Stripe.Customer).metadata?.userId;
 
@@ -366,7 +313,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     return;
   }
 
-  // Update the subscription status
   await supabaseAdmin
     .from('subscriptions')
     .update({
@@ -375,14 +321,12 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     })
     .eq('stripe_subscription_id', subscription.id);
 
-  // Get the free tier ID
   const { data: freeTierData } = await supabaseAdmin
     .from('subscription_tiers')
     .select('id')
     .eq('is_default', true)
     .single();
 
-  // Update user back to free tier
   await supabaseAdmin
     .from('users')
     .update({
