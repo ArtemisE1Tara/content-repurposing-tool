@@ -20,12 +20,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Webhook secret missing' }, { status: 500 });
   }
 
+  // Declare variables outside the try/catch for logging in case of errors
+  let rawBody = '';
+  let bodyLength = 0;
+
   try {
-    // 2. Get the raw request body as a buffer
-    // This step is crucial for signature verification
+    // 2. Get the raw request body as a buffer - THIS IS CRUCIAL FOR SIGNATURE VERIFICATION
+    console.log('🔄 Reading raw request body...');
     const chunks = [];
     const reader = req.body?.getReader();
+    
     if (!reader) {
+      console.error('❌ Request body reader is null or undefined');
       return NextResponse.json({ error: 'No request body' }, { status: 400 });
     }
 
@@ -33,36 +39,64 @@ export async function POST(req: NextRequest) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        chunks.push(value);
+        if (value) {
+          chunks.push(value);
+        }
       }
     } catch (err) {
-      console.error('Error reading request body:', err);
+      console.error('❌ Error reading request body:', err);
       return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
     }
 
+    // Safety check for empty chunks array
+    if (chunks.length === 0) {
+      console.error('❌ No chunks read from request body');
+      return NextResponse.json({ error: 'Empty request body' }, { status: 400 });
+    }
+
     const bodyBuffer = Buffer.concat(chunks);
-    const rawBody = bodyBuffer.toString('utf8');
+    rawBody = bodyBuffer.toString('utf8');
+    bodyLength = rawBody.length;
+
+    // Debug logging
+    console.log(`📦 Raw body successfully read (${bodyLength} bytes)`);
+    console.log(`📄 First 100 chars: ${rawBody.substring(0, 100)}...`);
+
+    if (bodyLength === 0) {
+      console.error('❌ Raw body is empty after reading');
+      return NextResponse.json({ error: 'Empty request body after reading' }, { status: 400 });
+    }
 
     // 3. Get the Stripe signature from headers
     const signature = req.headers.get('stripe-signature');
     if (!signature) {
-      console.error('No Stripe signature found in header');
+      console.error('❌ No Stripe signature found in header');
       return NextResponse.json({ error: 'No signature provided' }, { status: 400 });
     }
+    
+    console.log(`🔑 Signature received: ${signature.substring(0, 20)}...`);
 
-    // 4. Construct and verify the event
+    // 4. Construct and verify the event WITH THE RAW BODY
     let event: Stripe.Event;
     try {
-      // Documentation: https://docs.stripe.com/webhooks/signatures
+      // IMPORTANT: We pass the raw string directly as recommended in Stripe docs
       event = stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
       console.log(`✅ Webhook signature verified: ${event.id}`);
     } catch (err: any) {
       console.error(`⚠️ Webhook signature verification failed:`, err.message);
-      return NextResponse.json({ error: err.message }, { status: 400 });
+      // Log more details to help diagnose the issue
+      console.error(`  Body length: ${bodyLength} bytes`);
+      console.error(`  Signature starts with: ${signature.substring(0, 20)}...`);
+      console.error(`  Secret starts with: ${endpointSecret.substring(0, 4)}...`);
+      
+      return NextResponse.json({ 
+        error: err.message,
+        bodyLength,
+        signaturePresent: !!signature
+      }, { status: 400 });
     }
 
     // 5. Handle the event based on type
-    // Documentation: https://docs.stripe.com/webhooks/stripe-events
     console.log(`🪝 Processing webhook event: ${event.type} (${event.id})`);
     
     // Record event processing in database for idempotency
@@ -133,7 +167,11 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error('🚨 Webhook error:', err);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
+    console.error(`  Raw body length: ${bodyLength} bytes`);
+    return NextResponse.json({ 
+      error: 'Webhook processing failed',
+      bodyLength
+    }, { status: 500 });
   }
 }
 
