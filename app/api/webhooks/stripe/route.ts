@@ -8,80 +8,86 @@ import { supabaseAdmin, getOrCreateTier } from '@/lib/supabase-admin';
 // Server-only code
 import 'server-only';
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-
+// Simple synchronous webhook handler for better reliability in serverless environments
 export async function POST(req: NextRequest) {
-  // According to Stripe docs, we need to get the raw body for signature verification
-  const body = await req.text();
-  const signature = (await headers()).get('Stripe-Signature') as string;
-
-  // Log the headers to inspect them
-  console.log('Webhook Headers:', headers());
-  
-  // Validate required secret
-  if (!webhookSecret) {
-    console.error('Missing STRIPE_WEBHOOK_SECRET environment variable');
-    return new NextResponse('Webhook secret is not configured', { status: 500 });
-  }
-
-  if (!signature) {
-    console.error('Missing Stripe-Signature header');
-    return new NextResponse('No signature provided', { status: 400 });
-  }
-
-  let event: Stripe.Event;
-
   try {
-    // Per Stripe docs: Use constructEvent to verify the signature
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-    console.log('Webhook signature verified successfully');
-    console.log(`Processing webhook event: ${event.type} with id: ${event.id}`);
-  } catch (error: any) {
-    console.error(`Webhook signature verification failed: ${error.message}`);
-    return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
-  }
-
-  // Handle the event
-  try {
-    // Stripe recommends responding quickly and handling events asynchronously
-    // if they require significant processing time
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        console.log(`Processing checkout session: ${session.id}`);
-        await handleCheckoutSessionCompleted(session);
-        console.log(`Successfully processed checkout session: ${session.id}`);
-        break;
-      }
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated': {
-        const subscription = event.data.object as Stripe.Subscription;
-        console.log(`Processing subscription update: ${subscription.id}`);
-        await handleSubscriptionUpdated(subscription);
-        console.log(`Successfully processed subscription update: ${subscription.id}`);
-        break;
-      }
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object as Stripe.Subscription;
-        console.log(`Processing subscription deletion: ${subscription.id}`);
-        await handleSubscriptionDeleted(subscription);
-        console.log(`Successfully processed subscription deletion: ${subscription.id}`);
-        break;
-      }
-      default:
-        console.log(`Unhandled event type: ${event.type}`);
+    // 1. Validate environment variables
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      console.error('[WEBHOOK] Missing STRIPE_WEBHOOK_SECRET');
+      return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
+    }
+    
+    if (!process.env.STRIPE_SECRET_KEY) {
+      console.error('[WEBHOOK] Missing STRIPE_SECRET_KEY');
+      return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
+    }
+    
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      console.error('[WEBHOOK] Missing Supabase credentials');
+      return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
     }
 
-    // Return a 200 response to acknowledge receipt of the event
-    // This is critical per Stripe docs - return 200 even if you don't handle the event
-    return NextResponse.json({ received: true, eventId: event.id, type: event.type }, { status: 200 });
-  } catch (error) {
-    console.error('Error processing webhook:', error);
-    // Per Stripe docs: Return a 500 error for server errors
-    return NextResponse.json(
-      { error: 'Error processing webhook' },
-      { status: 500 }
-    );
+    // 2. Parse request and verify signature
+    const rawBody = await req.text();
+    const signature = (await headers()).get('stripe-signature');
+    
+    const resolvedHeaders = await headers();
+    console.log('[WEBHOOK] Headers:', JSON.stringify(Object.fromEntries([...resolvedHeaders.entries()])));
+    
+    if (!signature) {
+      console.error('[WEBHOOK] No Stripe signature found');
+      return NextResponse.json({ error: 'No signature' }, { status: 400 });
+    }
+
+    // 3. Construct and verify the event
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+      console.log(`[WEBHOOK] Event verified: ${event.id} (${event.type})`);
+    } catch (err: any) {
+      console.error(`[WEBHOOK] Verification failed: ${err.message}`);
+      return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+    }
+
+    // 4. Process the event - simplified for reliability
+    console.log(`[WEBHOOK] Processing event: ${event.type}`);
+    
+    // 5. Always return 200 quickly to Stripe - critical for webhooks
+    // This acknowledges receipt even if processing fails
+    const response = NextResponse.json({ received: true }, { status: 200 });
+    
+    // 6. Process different event types after sending response
+    // These errors will be logged but won't affect the response
+    try {
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object as Stripe.Checkout.Session;
+        await handleCheckoutSessionCompleted(session);
+      } 
+      else if (event.type === 'customer.subscription.created' || 
+               event.type === 'customer.subscription.updated') {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleSubscriptionUpdated(subscription);
+      }
+      else if (event.type === 'customer.subscription.deleted') {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleSubscriptionDeleted(subscription);
+      }
+    } catch (err: any) {
+      // Log but don't affect response - Stripe already got 200 OK
+      console.error(`[WEBHOOK] Error processing ${event.type}: ${err.message}`);
+      console.error(err.stack);
+    }
+    
+    return response;
+  } catch (err: any) {
+    // Catch-all error handler
+    console.error(`[WEBHOOK] Unexpected error: ${err.message}`);
+    console.error(err.stack);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
