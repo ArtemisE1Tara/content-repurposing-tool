@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { Buffer } from 'buffer';
 import { stripe } from '@/lib/stripe';
 import { getTierFromPriceId } from '@/lib/stripe-helpers';
 import { supabaseAdmin, getOrCreateTier } from '@/lib/supabase-admin';
 
-// Special config to disable body parsing for this route
+// Tell Next.js not to parse the body
 export const config = {
   api: {
     bodyParser: false,
@@ -13,165 +12,75 @@ export const config = {
 };
 
 export async function POST(req: NextRequest) {
-  // 1. Ensure webhook secret is configured
-  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!endpointSecret) {
-    console.error('Missing STRIPE_WEBHOOK_SECRET');
-    return NextResponse.json({ error: 'Webhook secret missing' }, { status: 500 });
-  }
-
-  // Declare variables outside the try/catch for logging in case of errors
-  let rawBody = '';
-  let bodyLength = 0;
-
   try {
-    // 2. Get the raw request body as a buffer - THIS IS CRUCIAL FOR SIGNATURE VERIFICATION
-    console.log('🔄 Reading raw request body...');
-    const chunks = [];
-    const reader = req.body?.getReader();
+    // Simple approach - directly use text() which preserves raw body
+    const payload = await req.text();
+    const sig = req.headers.get('stripe-signature') || '';
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+
+    console.log(`Received webhook: ${payload.length} bytes`);
+    console.log(`Signature header: ${sig.substring(0, 20)}...`);
     
-    if (!reader) {
-      console.error('❌ Request body reader is null or undefined');
-      return NextResponse.json({ error: 'No request body' }, { status: 400 });
+    // Log the timestamp part of the signature
+    const timestamp = sig.split(',')[0]?.split('=')[1];
+    console.log(`Timestamp from signature: ${timestamp}`);
+
+    if (!webhookSecret) {
+      console.error('Missing webhook secret!');
+      return new NextResponse('Webhook secret missing', { status: 500 });
     }
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-        }
-      }
-    } catch (err) {
-      console.error('❌ Error reading request body:', err);
-      return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
-    }
-
-    // Safety check for empty chunks array
-    if (chunks.length === 0) {
-      console.error('❌ No chunks read from request body');
-      return NextResponse.json({ error: 'Empty request body' }, { status: 400 });
-    }
-
-    const bodyBuffer = Buffer.concat(chunks);
-    rawBody = bodyBuffer.toString('utf8');
-    bodyLength = rawBody.length;
-
-    // Debug logging
-    console.log(`📦 Raw body successfully read (${bodyLength} bytes)`);
-    console.log(`📄 First 100 chars: ${rawBody.substring(0, 100)}...`);
-
-    if (bodyLength === 0) {
-      console.error('❌ Raw body is empty after reading');
-      return NextResponse.json({ error: 'Empty request body after reading' }, { status: 400 });
-    }
-
-    // 3. Get the Stripe signature from headers
-    const signature = req.headers.get('stripe-signature');
-    if (!signature) {
-      console.error('❌ No Stripe signature found in header');
-      return NextResponse.json({ error: 'No signature provided' }, { status: 400 });
-    }
-    
-    console.log(`🔑 Signature received: ${signature.substring(0, 20)}...`);
-
-    // 4. Construct and verify the event WITH THE RAW BODY
+    // Attempt to construct the event with proper error handling
     let event: Stripe.Event;
     try {
-      // IMPORTANT: We pass the raw string directly as recommended in Stripe docs
-      event = stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
-      console.log(`✅ Webhook signature verified: ${event.id}`);
+      event = stripe.webhooks.constructEvent(payload, sig, webhookSecret);
     } catch (err: any) {
-      console.error(`⚠️ Webhook signature verification failed:`, err.message);
-      // Log more details to help diagnose the issue
-      console.error(`  Body length: ${bodyLength} bytes`);
-      console.error(`  Signature starts with: ${signature.substring(0, 20)}...`);
-      console.error(`  Secret starts with: ${endpointSecret.substring(0, 4)}...`);
+      console.error('⚠️ Webhook signature verification failed:', err.message);
       
-      return NextResponse.json({ 
-        error: err.message,
-        bodyLength,
-        signaturePresent: !!signature
-      }, { status: 400 });
-    }
-
-    // 5. Handle the event based on type
-    console.log(`🪝 Processing webhook event: ${event.type} (${event.id})`);
-    
-    // Record event processing in database for idempotency
-    const { data: existingEvent } = await supabaseAdmin
-      .from('stripe_events')
-      .select('id')
-      .eq('stripe_event_id', event.id)
-      .maybeSingle();
-      
-    if (existingEvent) {
-      console.log(`⏭️ Event ${event.id} already processed, skipping`);
-      return NextResponse.json({ received: true, idempotent: true }, { status: 200 });
-    }
-    
-    // Process events based on type
-    try {
-      switch (event.type) {
-        case 'checkout.session.completed': {
-          const session = event.data.object as Stripe.Checkout.Session;
-          await handleCheckoutSessionCompleted(session);
-          break;
-        }
-        case 'customer.subscription.created':
-        case 'customer.subscription.updated': {
-          const subscription = event.data.object as Stripe.Subscription;
-          await handleSubscriptionUpdated(subscription);
-          break;
-        }
-        case 'customer.subscription.deleted': {
-          const subscription = event.data.object as Stripe.Subscription;
-          await handleSubscriptionDeleted(subscription);
-          break;
-        }
-        // Here you could handle other event types as needed
-        case 'invoice.paid':
-        case 'invoice.payment_succeeded':
-        case 'customer.updated':
-          // Add handlers for these event types if needed
-          console.log(`📝 Received ${event.type} event - no handler implemented`);
-          break;
-        default:
-          console.log(`⚠️ Unhandled event type: ${event.type}`);
+      // Log more diagnostic information
+      try {
+        // Try to parse the body to check it's valid JSON
+        const parsedPayload = JSON.parse(payload);
+        console.log(`Event ID: ${parsedPayload.id}, Type: ${parsedPayload.type}`);
+        
+        // Check if this is running in a test environment
+        const webhookIsForTest = parsedPayload.livemode === false;
+        console.log(`Test event: ${webhookIsForTest}`);
+        
+        // Check if we have the right webhook secret for test/live
+        console.log(`Using webhook secret starting with: ${webhookSecret.substring(0, 6)}...`);
+      } catch (parseErr) {
+        console.error('Body is not valid JSON!', parseErr);
       }
-
-      // Record successful event processing for idempotency
-      await supabaseAdmin.from('stripe_events').insert({
-        stripe_event_id: event.id,
-        event_type: event.type,
-        processed_at: new Date().toISOString()
-      });
       
-      // 6. Return a 200 response immediately after processing
-      return NextResponse.json({ 
-        received: true,
-        type: event.type,
-        id: event.id
-      }, { status: 200 });
-    } catch (processError) {
-      console.error(`🚨 Error processing event ${event.id}:`, processError);
-      
-      // Still return 200 to acknowledge receipt to prevent retries
-      // Stripe recommends returning 200 even for processing errors to avoid retries
-      return NextResponse.json({ 
-        received: true,
-        error: 'Processing error',
-        type: event.type
-      }, { status: 200 });
+      return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
     }
+
+    // If we get here, signature verified successfully!
+    console.log(`✅ Successfully verified webhook: ${event.id} (${event.type})`);
+    
+    // Return success immediately and process the event after
+    const response = NextResponse.json({ 
+      received: true, 
+      id: event.id, 
+      type: event.type 
+    }, { status: 200 });
+    
+    // Only process certain event types
+    if (event.type === 'checkout.session.completed') {
+      try {
+        const session = event.data.object as Stripe.Checkout.Session;
+        await handleCheckoutSessionCompleted(session);
+      } catch (error) {
+        console.error('Error processing checkout session:', error);
+      }
+    }
+    
+    // Always return 200 to Stripe
+    return response;
   } catch (err) {
-    console.error('🚨 Webhook error:', err);
-    console.error(`  Raw body length: ${bodyLength} bytes`);
-    return NextResponse.json({ 
-      error: 'Webhook processing failed',
-      bodyLength
-    }, { status: 500 });
+    console.error('Unexpected webhook error:', err);
+    return new NextResponse('Webhook error', { status: 500 });
   }
 }
 
