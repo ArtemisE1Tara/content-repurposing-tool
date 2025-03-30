@@ -13,66 +13,126 @@ export const config = {
 };
 
 export async function POST(req: NextRequest) {
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  // 1. Ensure webhook secret is configured
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!endpointSecret) {
     console.error('Missing STRIPE_WEBHOOK_SECRET');
     return NextResponse.json({ error: 'Webhook secret missing' }, { status: 500 });
   }
 
   try {
-    // 1. Get the raw request body as a buffer
+    // 2. Get the raw request body as a buffer
+    // This step is crucial for signature verification
     const chunks = [];
     const reader = req.body?.getReader();
     if (!reader) {
       return NextResponse.json({ error: 'No request body' }, { status: 400 });
     }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+    } catch (err) {
+      console.error('Error reading request body:', err);
+      return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
     }
 
     const bodyBuffer = Buffer.concat(chunks);
     const rawBody = bodyBuffer.toString('utf8');
 
-    // 2. Get the Stripe signature from headers
+    // 3. Get the Stripe signature from headers
     const signature = req.headers.get('stripe-signature');
     if (!signature) {
       console.error('No Stripe signature found in header');
       return NextResponse.json({ error: 'No signature provided' }, { status: 400 });
     }
 
-    // 3. Construct and verify the event
+    // 4. Construct and verify the event
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(
-        rawBody,
-        signature,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
+      // Documentation: https://docs.stripe.com/webhooks/signatures
+      event = stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
+      console.log(`✅ Webhook signature verified: ${event.id}`);
     } catch (err: any) {
-      console.error(`Webhook signature verification failed: ${err.message}`);
+      console.error(`⚠️ Webhook signature verification failed:`, err.message);
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
 
-    // 4. Return a 200 response immediately
-    console.log(`Event processed: ${event.type}`);
-
-    // 5. Process the event based on type
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
-      try {
-        await handleCheckoutSessionCompleted(session);
-        console.log(`Successfully processed checkout session: ${session.id}`);
-      } catch (error) {
-        console.error(`Error processing checkout session: ${error}`);
-        // Still return 200 to acknowledge receipt
-      }
+    // 5. Handle the event based on type
+    // Documentation: https://docs.stripe.com/webhooks/stripe-events
+    console.log(`🪝 Processing webhook event: ${event.type} (${event.id})`);
+    
+    // Record event processing in database for idempotency
+    const { data: existingEvent } = await supabaseAdmin
+      .from('stripe_events')
+      .select('id')
+      .eq('stripe_event_id', event.id)
+      .maybeSingle();
+      
+    if (existingEvent) {
+      console.log(`⏭️ Event ${event.id} already processed, skipping`);
+      return NextResponse.json({ received: true, idempotent: true }, { status: 200 });
     }
+    
+    // Process events based on type
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object as Stripe.Checkout.Session;
+          await handleCheckoutSessionCompleted(session);
+          break;
+        }
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated': {
+          const subscription = event.data.object as Stripe.Subscription;
+          await handleSubscriptionUpdated(subscription);
+          break;
+        }
+        case 'customer.subscription.deleted': {
+          const subscription = event.data.object as Stripe.Subscription;
+          await handleSubscriptionDeleted(subscription);
+          break;
+        }
+        // Here you could handle other event types as needed
+        case 'invoice.paid':
+        case 'invoice.payment_succeeded':
+        case 'customer.updated':
+          // Add handlers for these event types if needed
+          console.log(`📝 Received ${event.type} event - no handler implemented`);
+          break;
+        default:
+          console.log(`⚠️ Unhandled event type: ${event.type}`);
+      }
 
-    return NextResponse.json({ received: true }, { status: 200 });
+      // Record successful event processing for idempotency
+      await supabaseAdmin.from('stripe_events').insert({
+        stripe_event_id: event.id,
+        event_type: event.type,
+        processed_at: new Date().toISOString()
+      });
+      
+      // 6. Return a 200 response immediately after processing
+      return NextResponse.json({ 
+        received: true,
+        type: event.type,
+        id: event.id
+      }, { status: 200 });
+    } catch (processError) {
+      console.error(`🚨 Error processing event ${event.id}:`, processError);
+      
+      // Still return 200 to acknowledge receipt to prevent retries
+      // Stripe recommends returning 200 even for processing errors to avoid retries
+      return NextResponse.json({ 
+        received: true,
+        error: 'Processing error',
+        type: event.type
+      }, { status: 200 });
+    }
   } catch (err) {
-    console.error('Webhook error:', err);
+    console.error('🚨 Webhook error:', err);
     return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }
