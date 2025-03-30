@@ -1,87 +1,98 @@
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { getUserUsageStats, getSubscriptionTiers } from "@/lib/memberships";
+'use client'
 import { Separator } from "@/components/ui/separator";
-import { AlertCircle, Check } from "lucide-react";
-import { UsageDisplay } from "@/components/usage-display";
+import { SubscriptionPlans } from "@/components/subscription/subscription-plans";
+import { ManageSubscription } from "@/components/subscription/manage-subscription";
+import { useSubscription } from "@/hooks/use-subscription";
+import { useSubscriptionPlans } from "@/hooks/use-subscription-plans";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { CheckCircle2, XCircle } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
-export default async function MembershipPage() {
-  try {
-    const [stats, tiers] = await Promise.all([
-      getUserUsageStats(),
-      getSubscriptionTiers()
-    ]);
+export default function MembershipPage() {
+  const searchParams = useSearchParams();
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [showCanceled, setShowCanceled] = useState(false);
+  
+  const { subscription, isLoading: subscriptionLoading, mutate } = useSubscription();
+  const { plans, isLoading: plansLoading } = useSubscriptionPlans();
+  
+  useEffect(() => {
+    // Check URL parameters for checkout status
+    const success = searchParams?.get('success');
+    const canceled = searchParams?.get('canceled');
     
-    const currentTierId = stats?.subscription?.tier?.id;
+    if (success === 'true') {
+      setShowSuccess(true);
+      // Auto-hide success message after 5 seconds
+      const timer = setTimeout(() => setShowSuccess(false), 5000);
+      return () => clearTimeout(timer);
+    }
+    
+    if (canceled === 'true') {
+      setShowCanceled(true);
+      // Auto-hide canceled message after 5 seconds
+      const timer = setTimeout(() => setShowCanceled(false), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams]);
 
-    return (
-      <div className="container py-10 max-w-5xl">
-        <h1 className="text-3xl font-bold mb-6">Membership Settings</h1>
-        
-        <div className="grid gap-6 mb-8">
-          <UsageDisplay />
-        </div>
-        
-        <h2 className="text-2xl font-bold mb-4">Available Plans</h2>
-        <div className="grid gap-6 md:grid-cols-3">
-          {tiers.map((tier) => (
-            <Card key={tier.id} className={`border-2 ${currentTierId === tier.id ? 'border-primary' : ''}`}>
-              <CardHeader>
-                <CardTitle>{tier.name}</CardTitle>
-                <CardDescription>
-                  ${tier.price_monthly}/month
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <ul className="space-y-2">
-                  <li className="flex items-start">
-                    <Check className="h-5 w-5 mr-2 text-primary shrink-0" />
-                    <span>{tier.daily_generation_limit} generations per day</span>
-                  </li>
-                  <li className="flex items-start">
-                    <Check className="h-5 w-5 mr-2 text-primary shrink-0" />
-                    <span>Up to {tier.platform_limit} platforms per generation</span>
-                  </li>
-                  <li className="flex items-start">
-                    <Check className="h-5 w-5 mr-2 text-primary shrink-0" />
-                    <span>Up to {tier.max_character_count} characters per generation</span>
-                  </li>
-                </ul>
-              </CardContent>
-              <CardFooter>
-                {currentTierId === tier.id ? (
-                  <Button disabled className="w-full">Current Plan</Button>
-                ) : (
-                  <Button variant="outline" className="w-full">
-                    {currentTierId && tiers.find(t => t.id === currentTierId)?.price_monthly < tier.price_monthly
-                      ? "Upgrade"
-                      : "Switch Plan"}
-                  </Button>
-                )}
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-        
-        <div className="mt-8">
-          <p className="text-sm text-muted-foreground">
-            Note: Stripe integration for payments will be added soon. Currently, all users are on the free tier.
-          </p>
-        </div>
+  return (
+    <div className="container mx-auto py-6">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold">Membership</h1>
+        <p className="text-muted-foreground">
+          Manage your subscription and billing information
+        </p>
       </div>
-    );
-  } catch (error) {
-    console.error("Error loading membership page:", error);
-    return (
-      <div className="container py-10">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+      
+      {showSuccess && (
+        <Alert className="mb-6 bg-green-50 dark:bg-green-950">
+          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+          <AlertTitle>Success!</AlertTitle>
           <AlertDescription>
-            Failed to load membership data. Please try again later.
+            Your subscription has been processed successfully.
           </AlertDescription>
         </Alert>
-      </div>
-    );
-  }
+      )}
+      
+      {showCanceled && (
+        <Alert className="mb-6 bg-amber-50 dark:bg-amber-950">
+          <XCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <AlertTitle>Checkout canceled</AlertTitle>
+          <AlertDescription>
+            Your subscription checkout was canceled. You can try again whenever you're ready.
+          </AlertDescription>
+        </Alert>
+      )}
+      
+      {subscriptionLoading ? (
+        <div className="flex h-40 items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+        </div>
+      ) : (
+        <>
+          {subscription?.isActive && (
+            <div className="mb-8">
+              <h2 className="mb-4 text-2xl font-semibold">Your Subscription</h2>
+              <ManageSubscription 
+                subscription={subscription} 
+                onSubscriptionUpdated={mutate} 
+              />
+              <Separator className="my-8" />
+            </div>
+          )}
+          
+          <div>
+            <h2 className="mb-4 text-2xl font-semibold">Available Plans</h2>
+            <SubscriptionPlans 
+              plans={plans} 
+              currentPlan={subscription?.tier}
+              isLoading={plansLoading}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
