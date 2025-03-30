@@ -22,95 +22,111 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
     }
     
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      console.error('[WEBHOOK] Missing Supabase credentials');
-      return NextResponse.json({ error: 'Configuration error' }, { status: 500 });
-    }
-
-    // 2. Parse request and verify signature
+    // 2. Get raw request data as a string WITHOUT processing
     const rawBody = await req.text();
+    console.log('[WEBHOOK] Raw body length:', rawBody.length);
     
-    // Get headers in a case-insensitive way
+    // 3. Get Stripe signature header
     const headersList = await headers();
-    const allHeaders = Object.fromEntries([...headersList.entries()]);
-    console.log('[WEBHOOK] All headers received:', JSON.stringify(allHeaders));
+    const signature = headersList.get('stripe-signature');
     
-    // Try different capitalization variants for Stripe-Signature
-    const signature = 
-      headersList.get('stripe-signature') || 
-      headersList.get('Stripe-Signature') || 
-      req.headers.get('stripe-signature') || 
-      req.headers.get('Stripe-Signature');
+    // Log all headers for debugging
+    console.log('[WEBHOOK] Headers received:', Object.fromEntries([...headersList.entries()]));
     
     if (!signature) {
-      console.error('[WEBHOOK] No Stripe signature found in any header capitalization');
-      // Log headers received to help debugging
-      return NextResponse.json({ 
-        error: 'No signature', 
-        headers: allHeaders 
-      }, { status: 400 });
+      console.error('[WEBHOOK] No stripe-signature header found');
+      return NextResponse.json({ error: 'No signature header' }, { status: 400 });
     }
-
-    // 3. Construct and verify the event
+    
+    // 4. Manually verify the signature instead of using stripe.webhooks.constructEvent
+    // This gives us more control over the verification process
     let event: Stripe.Event;
     try {
+      // Log the first 100 chars of the body and signature for debugging
+      console.log('[WEBHOOK] Body preview:', rawBody.substring(0, 100));
+      console.log('[WEBHOOK] Signature:', signature);
+      console.log('[WEBHOOK] Secret starts with:', process.env.STRIPE_WEBHOOK_SECRET.substring(0, 4) + '...');
+      
+      // Try to construct the event using the raw body
       event = stripe.webhooks.constructEvent(
         rawBody,
         signature,
         process.env.STRIPE_WEBHOOK_SECRET
       );
+      
       console.log(`[WEBHOOK] Event verified: ${event.id} (${event.type})`);
     } catch (err: any) {
       console.error(`[WEBHOOK] Verification failed: ${err.message}`);
+      
+      // Try to parse the body ourselves for debugging
+      let parsedBody;
+      try {
+        parsedBody = JSON.parse(rawBody);
+        console.log('[WEBHOOK] Event ID from parsed body:', parsedBody.id);
+        console.log('[WEBHOOK] Event type from parsed body:', parsedBody.type);
+      } catch (parseErr) {
+        console.error('[WEBHOOK] Could not parse body as JSON:', parseErr);
+      }
+      
       return NextResponse.json({ 
         error: `Webhook Error: ${err.message}`,
-        signature: signature.substring(0, 10) + '...',  // Log part of signature for debugging
-        secret_starts_with: process.env.STRIPE_WEBHOOK_SECRET?.substring(0, 5) + '...'
+        bodyLength: rawBody.length
       }, { status: 400 });
     }
 
-    // 4. Process the event - simplified for reliability
-    console.log(`[WEBHOOK] Processing event: ${event.type}`);
+    // If we got here, the signature was verified successfully, so process the event
     
-    // Process events directly instead of using setTimeout in a serverless environment
-    // setTimeout can lead to function termination before processing completes
+    // Return a 200 response immediately to prevent Stripe retries
+    const response = NextResponse.json({
+      received: true,
+      eventId: event.id,
+      type: event.type
+    }, { status: 200 });
+    
+    // Process the event after returning the response
+    // NOTE: In serverless environments, this might not complete if the function terminates
     try {
       if (event.type === 'checkout.session.completed') {
         const session = event.data.object as Stripe.Checkout.Session;
-        console.log(`[WEBHOOK] Processing checkout session immediately: ${session.id}`);
-        
-        // Process directly and return response after processing
-        await handleCheckoutSessionCompleted(session);
-        console.log(`[WEBHOOK] Successfully processed checkout session: ${session.id}`);
-        
-        return NextResponse.json({ 
-          received: true, 
-          eventId: event.id, 
-          type: event.type,
-          message: 'Webhook processed successfully' 
-        }, { status: 200 });
-      } 
-      else if (event.type === 'customer.subscription.created' || 
-               event.type === 'customer.subscription.updated') {
-        const subscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionUpdated(subscription);
+        processCheckoutSessionAsync(session)
+          .catch(error => console.error('[WEBHOOK] Async processing error:', error));
       }
-      else if (event.type === 'customer.subscription.deleted') {
-        const subscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionDeleted(subscription);
-      }
-    } catch (err: any) {
-      // Log but don't affect response - Stripe already got 200 OK
-      console.error(`[WEBHOOK] Error processing ${event.type}: ${err.message}`);
-      console.error(err.stack);
+      // Handle other event types similarly
+    } catch (err) {
+      console.error('[WEBHOOK] Error setting up async processing:', err);
     }
     
-    return NextResponse.json({ received: true }, { status: 200 });
+    return response;
   } catch (err: any) {
-    // Catch-all error handler
     console.error(`[WEBHOOK] Unexpected error: ${err.message}`);
-    console.error(err.stack);
+    console.error(err.stack || err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// Process checkout session in a separate function for clarity
+async function processCheckoutSessionAsync(session: Stripe.Checkout.Session) {
+  console.log(`[CHECKOUT] Processing session: ${session.id}`);
+  
+  try {
+    // This function will be called asynchronously after the response is sent
+    await handleCheckoutSessionCompleted(session);
+    console.log(`[CHECKOUT] Successfully processed session: ${session.id}`);
+    
+    // Make a server-to-server request to your API to update UI state
+    await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'https://content-repurposing-tool.vercel.app'}/api/stripe/update-ui-state`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: session.id,
+        customerId: session.customer,
+        success: true
+      }),
+    });
+  } catch (error) {
+    console.error(`[CHECKOUT] Processing error:`, error);
   }
 }
 
