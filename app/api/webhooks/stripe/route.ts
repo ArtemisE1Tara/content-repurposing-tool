@@ -14,6 +14,9 @@ export async function POST(req: NextRequest) {
   const body = await req.text();
   const signature = (await headers()).get('Stripe-Signature') as string;
 
+  // Log the headers to inspect them
+  console.log('Webhook Headers:', headers());
+
   let event: Stripe.Event;
 
   try {
