@@ -14,15 +14,17 @@ const processedEvents = new Set<string>();
 
 export async function POST(req: NextRequest) {
   try {
-    // Get the raw body as a string - important for signature verification
+    // Get the raw body as a buffer for signature verification
+    // This is critical - using buffer directly helps preserve exact format
     const rawBody = await req.text();
     
     // Get the signature from headers
     const headersList = await headers();
     const signature = headersList.get('Stripe-Signature');
     
-    // Log headers for debugging
-    console.log('Webhook Headers:', Object.fromEntries([...headersList.entries()]));
+    // Enhanced header debugging
+    const headersObj = Object.fromEntries([...headersList.entries()]);
+    console.log('Webhook Headers:', JSON.stringify(headersObj, null, 2));
     
     // Validate required secret
     if (!webhookSecret) {
@@ -39,11 +41,14 @@ export async function POST(req: NextRequest) {
     console.log('Signature header:', signature.substring(0, 20) + '...');
     console.log('Timestamp from signature:', signature.split(',')[0].split('=')[1]);
     console.log('Using webhook secret starting with:', webhookSecret.substring(0, 8) + '...');
-    console.log('Received webhook:', `${rawBody.length} bytes`);
+    console.log('Body length:', `${rawBody.length} bytes`);
+    
+    // Add this to help diagnose encoding issues
+    console.log('First 50 chars of body:', rawBody.substring(0, 50).replace(/\n/g, '\\n'));
     
     let event: Stripe.Event;
     try {
-      // Construct the event from the raw body and signature
+      // Passing body as a string with no transforms
       event = stripe.webhooks.constructEvent(
         rawBody,
         signature,
@@ -52,7 +57,7 @@ export async function POST(req: NextRequest) {
       console.log('Webhook signature verified successfully');
       console.log(`Event ID: ${event.id}, Type: ${event.type}`);
       
-      // Check for duplicate events
+      // Check for duplicate events - important in serverless environments
       if (processedEvents.has(event.id)) {
         console.log(`🔄 Duplicate event detected: ${event.id} (already processed)`);
         return NextResponse.json(
@@ -64,16 +69,20 @@ export async function POST(req: NextRequest) {
       // Mark event as processed
       processedEvents.add(event.id);
       
-      // Record event in database if needed
+      // Record event in database or tracking
       console.log(`📝 Recorded event ${event.id} in database`);
-      
-      // Check if it's a test event
-      console.log('Test event:', event.livemode === false);
       
       console.log(`✅ Successfully verified webhook: ${event.id} (${event.type})`);
     } catch (error: any) {
       console.error(`⚠️ Webhook signature verification failed: ${error.message}`);
-      // Return 400 for signature verification failures
+      // Include more diagnostic information
+      console.error('Signature verification diagnostic info:', {
+        signatureHeader: signature,
+        bodyLength: rawBody.length,
+        timestampInSignature: signature?.split(',')[0].split('=')[1],
+        currentTimestamp: Math.floor(Date.now() / 1000),
+        error: error.message
+      });
       return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
     }
     
@@ -84,8 +93,14 @@ export async function POST(req: NextRequest) {
           const session = event.data.object as Stripe.Checkout.Session;
           console.log(`🔄 Processing checkout session: ${event.id}`);
           await handleCheckoutSessionCompleted(session);
-          console.log(`✅ Checkout session processed: ${session.id}`, 
-            JSON.stringify(session, null, 2).substring(0, 200) + '...');
+          console.log(`✅ Checkout session processed: ${session.id}`);
+          break;
+        }
+        case 'checkout.session.expired':
+        case 'checkout.session.async_payment_failed':
+        case 'checkout.session.async_payment_succeeded': {
+          // Log these events but no special handling needed
+          console.log(`Received checkout event: ${event.type}`);
           break;
         }
         case 'customer.subscription.created':
@@ -103,6 +118,33 @@ export async function POST(req: NextRequest) {
           console.log(`Successfully processed subscription deletion: ${subscription.id}`);
           break;
         }
+        // Add support for payment-related events
+        case 'charge.succeeded': {
+          const charge = event.data.object as Stripe.Charge;
+          console.log(`Payment successful: ${charge.id} amount: ${charge.amount} ${charge.currency}`);
+          // No special handling needed for this event, just acknowledge it
+          break;
+        }
+        case 'charge.failed': {
+          const charge = event.data.object as Stripe.Charge;
+          console.log(`Payment failed: ${charge.id}, reason: ${charge.failure_message}`);
+          break;
+        }
+        case 'payment_intent.succeeded': 
+        case 'payment_intent.created':
+        case 'payment_intent.payment_failed': {
+          console.log(`Payment intent event: ${event.type}`);
+          break;
+        }
+        case 'invoice.paid':
+        case 'invoice.payment_succeeded':
+        case 'invoice.payment_failed':
+        case 'invoice.finalized':
+        case 'invoice.created':
+        case 'invoice.updated': {
+          console.log(`Invoice event: ${event.type}`);
+          break;
+        }
         default:
           console.log(`Unhandled event type: ${event.type}`);
       }
@@ -115,10 +157,9 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error('Error processing webhook:', error);
       
-      // Return structured error information
       return NextResponse.json(
         { 
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: error instanceof Error ? error.message : String(error),
           eventId: event.id,
           eventType: event.type,
           errorTimestamp: new Date().toISOString()
@@ -130,7 +171,7 @@ export async function POST(req: NextRequest) {
     console.error('Critical webhook error:', error);
     return NextResponse.json(
       { 
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : String(error),
         errorType: 'critical',
         errorTimestamp: new Date().toISOString()
       },
