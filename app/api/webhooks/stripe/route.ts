@@ -6,7 +6,7 @@ import { getTierFromPriceId } from '@/lib/stripe-helpers';
 import { supabaseAdmin, getOrCreateTier } from '@/lib/supabase-admin';
 
 // Server-only code
-import 'server-only';
+
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
