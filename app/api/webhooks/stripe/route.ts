@@ -29,14 +29,26 @@ export async function POST(req: NextRequest) {
 
     // 2. Parse request and verify signature
     const rawBody = await req.text();
-    const signature = (await headers()).get('stripe-signature');
     
-    const resolvedHeaders = await headers();
-    console.log('[WEBHOOK] Headers:', JSON.stringify(Object.fromEntries([...resolvedHeaders.entries()])));
+    // Get headers in a case-insensitive way
+    const headersList = await headers();
+    const allHeaders = Object.fromEntries([...headersList.entries()]);
+    console.log('[WEBHOOK] All headers received:', JSON.stringify(allHeaders));
+    
+    // Try different capitalization variants for Stripe-Signature
+    const signature = 
+      headersList.get('stripe-signature') || 
+      headersList.get('Stripe-Signature') || 
+      req.headers.get('stripe-signature') || 
+      req.headers.get('Stripe-Signature');
     
     if (!signature) {
-      console.error('[WEBHOOK] No Stripe signature found');
-      return NextResponse.json({ error: 'No signature' }, { status: 400 });
+      console.error('[WEBHOOK] No Stripe signature found in any header capitalization');
+      // Log headers received to help debugging
+      return NextResponse.json({ 
+        error: 'No signature', 
+        headers: allHeaders 
+      }, { status: 400 });
     }
 
     // 3. Construct and verify the event
@@ -50,7 +62,11 @@ export async function POST(req: NextRequest) {
       console.log(`[WEBHOOK] Event verified: ${event.id} (${event.type})`);
     } catch (err: any) {
       console.error(`[WEBHOOK] Verification failed: ${err.message}`);
-      return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+      return NextResponse.json({ 
+        error: `Webhook Error: ${err.message}`,
+        signature: signature.substring(0, 10) + '...',  // Log part of signature for debugging
+        secret_starts_with: process.env.STRIPE_WEBHOOK_SECRET?.substring(0, 5) + '...'
+      }, { status: 400 });
     }
 
     // 4. Process the event - simplified for reliability
