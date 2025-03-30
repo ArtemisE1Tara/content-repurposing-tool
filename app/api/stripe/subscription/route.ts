@@ -14,7 +14,8 @@ const supabase = createClient<Database>(
 // GET endpoint to retrieve subscription info
 export async function GET() {
   try {
-    const { userId } = auth();
+    // Fix: `auth()` needs to be awaited
+    const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json(
@@ -73,7 +74,8 @@ export async function GET() {
 // POST endpoint to cancel or reactivate subscription
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = auth();
+    // Fix: `auth()` needs to be awaited here too
+    const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json(

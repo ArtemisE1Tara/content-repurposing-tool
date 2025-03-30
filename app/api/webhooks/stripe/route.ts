@@ -11,6 +11,7 @@ import 'server-only';
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(req: NextRequest) {
+  // According to Stripe docs, we need to get the raw body for signature verification
   const body = await req.text();
   const signature = (await headers()).get('Stripe-Signature') as string;
 
@@ -23,9 +24,15 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Webhook secret is not configured', { status: 500 });
   }
 
+  if (!signature) {
+    console.error('Missing Stripe-Signature header');
+    return new NextResponse('No signature provided', { status: 400 });
+  }
+
   let event: Stripe.Event;
 
   try {
+    // Per Stripe docs: Use constructEvent to verify the signature
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
     console.log('Webhook signature verified successfully');
     console.log(`Processing webhook event: ${event.type} with id: ${event.id}`);
@@ -36,6 +43,8 @@ export async function POST(req: NextRequest) {
 
   // Handle the event
   try {
+    // Stripe recommends responding quickly and handling events asynchronously
+    // if they require significant processing time
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -63,9 +72,12 @@ export async function POST(req: NextRequest) {
         console.log(`Unhandled event type: ${event.type}`);
     }
 
+    // Return a 200 response to acknowledge receipt of the event
+    // This is critical per Stripe docs - return 200 even if you don't handle the event
     return NextResponse.json({ received: true, eventId: event.id, type: event.type }, { status: 200 });
   } catch (error) {
     console.error('Error processing webhook:', error);
+    // Per Stripe docs: Return a 500 error for server errors
     return NextResponse.json(
       { error: 'Error processing webhook' },
       { status: 500 }
