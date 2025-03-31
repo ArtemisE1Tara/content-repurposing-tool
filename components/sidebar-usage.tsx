@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import { useState, useEffect } from "react";
 import { Progress } from "@/components/ui/progress";
@@ -31,30 +31,43 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
 
   useEffect(() => {
     fetchUsage();
-    
-    // Refresh stats every hour
     const interval = setInterval(fetchUsage, 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
   if (loading || error || !usage) {
-    return null; // Don't show anything while loading or on error
+    return null;
   }
 
+  const getFriendlyTierName = () => {
+    const tier = usage.subscription.tier;
+    const name = tier.name;
+
+    if (typeof name === "string" && (name.includes("-") || name.length > 20)) {
+      if (tier.price_monthly === 0) return "Free";
+      if (tier.price_monthly <= 10) return "Basic";
+      if (tier.price_monthly <= 20) return "Pro";
+      return "Premium";
+    }
+
+    return typeof name === "string"
+      ? name.charAt(0).toUpperCase() + name.slice(1)
+      : "Free";
+  };
+
   if (isCollapsed) {
-    // Minimal view for collapsed sidebar
     return (
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
             <Link href="/settings/membership" className="block px-2 py-2">
               <div className="flex flex-col items-center">
-                <Progress 
-                  value={usage.percentUsed} 
+                <Progress
+                  value={usage.percentUsed}
                   className={cn(
-                    "h-1 w-full mb-1", 
+                    "h-1 w-full mb-1",
                     usage.isOverLimit ? "[&>div]:bg-destructive" : "[&>div]:bg-primary"
-                  )} 
+                  )}
                 />
                 <span className="text-[10px] text-muted-foreground">
                   {usage.generationsThisDay}/{usage.dailyLimit}
@@ -66,7 +79,7 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
             <div className="text-xs">
               {usage.generationsThisDay}/{usage.dailyLimit} generations used today
               <p className="text-muted-foreground text-[10px] mt-1">
-                {usage.subscription.tier.name} plan
+                {getFriendlyTierName()} Plan
               </p>
             </div>
           </TooltipContent>
@@ -75,33 +88,36 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
     );
   }
 
-  // Expanded view
   return (
     <div className="px-3 py-2 border-t">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium">{usage.subscription.tier.name} Plan</span>
-        <Button 
-          variant="ghost" 
-          size="sm" 
+        <span className="text-xs font-medium">
+          {getFriendlyTierName()} Plan
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
           className="h-5 w-5 p-0"
           onClick={() => setExpanded(!expanded)}
         >
-          <ChevronUp className={cn("h-3 w-3 transition-transform", !expanded && "rotate-180")} />
+          <ChevronUp
+            className={cn("h-3 w-3 transition-transform", !expanded && "rotate-180")}
+          />
           <span className="sr-only">Toggle details</span>
         </Button>
       </div>
-
       <div className="flex items-center gap-2">
-        <Progress 
-          value={usage.percentUsed} 
+        <Progress
+          value={usage.percentUsed}
           className={cn(
-            "h-2 flex-grow", 
+            "h-2 flex-grow",
             usage.isOverLimit ? "[&>div]:bg-destructive" : ""
-          )} 
+          )}
         />
-        <span className="text-xs font-medium w-16 text-right">{usage.generationsThisDay}/{usage.dailyLimit}</span>
+        <span className="text-xs font-medium w-16 text-right">
+          {usage.generationsThisDay}/{usage.dailyLimit}
+        </span>
       </div>
-
       {expanded && (
         <div className="mt-2 space-y-1 text-xs">
           <p className="flex justify-between">

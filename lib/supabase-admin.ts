@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Database } from '@/types/database.types';
+import { Database } from '../types/database.types';
 import 'server-only';
 
 // Initialize Supabase Admin client for server-side operations
@@ -104,19 +104,51 @@ export async function getOrCreateTier(tierName: string): Promise<SubscriptionTie
 
 // Sync subscription tiers with Stripe
 export async function syncSubscriptionTiersWithStripe() {
-  // This would typically be called after Stripe product/price updates
-  // For now, we'll ensure the basic tiers exist
-  
-  // Create free tier
-  await getOrCreateTier('free');
-  
-  // Create paid tiers
-  await getOrCreateTier('basic');
-  await getOrCreateTier('pro');
-  await getOrCreateTier('premium');
-  
-  return {
-    success: true,
-    message: 'Subscription tiers synced successfully'
-  };
+  try {
+    console.log('Starting subscription tier sync process...');
+    
+    // Check if we have any tiers at all
+    const { data: existingTiers, error: checkError } = await supabaseAdmin
+      .from('subscription_tiers')
+      .select('id, name')
+      .limit(1);
+      
+    if (checkError) {
+      console.error('Error checking subscription tiers:', checkError);
+      throw new Error(`Failed to check subscription tiers: ${checkError.message}`);
+    }
+    
+    // If no tiers exist, log this important information
+    if (!existingTiers || existingTiers.length === 0) {
+      console.log('No subscription tiers found in database. Creating all tiers from scratch...');
+    }
+    
+    // Create all tiers - this will create them if they don't exist
+    // Create free tier first (this is critical for user signup)
+    console.log('Creating/verifying free tier...');
+    await getOrCreateTier('free');
+    
+    // Create paid tiers
+    console.log('Creating/verifying basic tier...');
+    await getOrCreateTier('basic');
+    
+    console.log('Creating/verifying pro tier...');
+    await getOrCreateTier('pro');
+    
+    console.log('Creating/verifying premium tier...');
+    await getOrCreateTier('premium');
+    
+    console.log('Subscription tier sync completed successfully');
+    
+    return {
+      success: true,
+      message: 'Subscription tiers synced successfully'
+    };
+  } catch (error) {
+    console.error('Error syncing subscription tiers:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error during tier sync'
+    };
+  }
 }

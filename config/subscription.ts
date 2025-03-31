@@ -42,7 +42,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     name: 'Premium',
     description: 'Ultimate toolkit for content marketing teams',
     tier: 'premium',
-    priceId: '', // Will be populated from Stripe
+    priceId: 'price_1R8aP2B0MIXSPfNYdxMlWWmE', // Will be populated from Stripe
     price: 0, // Will be populated from Stripe
     currency: 'USD',
     interval: 'month',
