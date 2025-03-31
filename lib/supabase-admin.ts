@@ -8,8 +8,18 @@ export const supabaseAdmin = createClient<Database>(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// Define type for subscription tier based on Database type
+type SubscriptionTier = Database['public']['Tables']['subscription_tiers']['Row'];
+// Define type for insert operation
+type SubscriptionTierInsert = Database['public']['Tables']['subscription_tiers']['Insert'];
+// Define limits type
+type TierLimits = {
+  max_projects: number;
+  max_tokens: number;
+};
+
 // Make sure this function properly handles numeric values
-export async function getOrCreateTier(tierName: string): Promise<{ id: number; name: string }> {
+export async function getOrCreateTier(tierName: string): Promise<SubscriptionTier> {
   try {
     // First, check if the tier already exists
     const { data: existingTier, error: queryError } = await supabaseAdmin
@@ -30,10 +40,25 @@ export async function getOrCreateTier(tierName: string): Promise<{ id: number; n
     
     // Tier doesn't exist, create it with appropriate defaults based on tier name
     let price = 0; // Default price
-    let limits = {};
+    let limits: TierLimits = {
+      max_projects: 3,
+      max_tokens: 10000
+    };
     
     // Set appropriate values based on tier
-    if (tierName === 'pro') {
+    if (tierName === 'free') {
+      price = 0;
+      limits = {
+        max_projects: 2,
+        max_tokens: 5000
+      };
+    } else if (tierName === 'basic') {
+      price = 9;
+      limits = {
+        max_projects: 5,
+        max_tokens: 50000
+      };
+    } else if (tierName === 'pro') {
       price = 19; // Store as integer (dollars), not as string or float
       limits = {
         max_projects: 10,
@@ -47,17 +72,21 @@ export async function getOrCreateTier(tierName: string): Promise<{ id: number; n
       };
     }
     
-    // Insert the new tier with proper numeric values
+    // Create properly typed insert data
+    const newTierData: SubscriptionTierInsert = {
+      name: tierName,
+      price_monthly: price,
+      price_yearly: price * 10, // Assuming yearly is 10 months worth for discount
+      daily_generation_limit: limits.max_tokens,
+      platform_limit: limits.max_projects,
+      max_character_count: limits.max_tokens * 4, // Estimate character count from tokens
+      is_default: tierName === 'free' // Only free tier is default
+    };
+    
+    // Insert the new tier with proper typed values
     const { data: newTier, error: insertError } = await supabaseAdmin
       .from('subscription_tiers')
-      .insert({
-        name: tierName,
-        price: price, // This should be an integer, not a string like "19.95"
-        limits: limits,
-        is_default: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
+      .insert(newTierData)
       .select('*')
       .single();
     
