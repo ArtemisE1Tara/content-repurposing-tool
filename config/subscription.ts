@@ -2,7 +2,7 @@ import { SubscriptionPlan } from '@/types/subscription';
 
 // These are default values that will be updated with data from Stripe
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
-  {
+ /* {
     id: 'basic',
     name: 'Basic',
     description: 'Essential tools for content repurposing',
@@ -17,7 +17,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'Export to 3 formats',
       'Email support',
     ],
-  },
+  },*/
   {
     id: 'pro',
     name: 'Professional',
@@ -28,16 +28,11 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     currency: 'USD',
     interval: 'month',
     features: [
-      'Up to 50 content pieces per month',
-      'Advanced repurposing templates',
-      'Export to all formats',
-      'Priority email support',
-      'AI-powered content suggestions',
-      'Custom branding',
+      'Up to 200 generations per day',
     ],
-    isPopular: true,
+    isPopular: false,
   },
-  {
+ /* {
     id: 'premium',
     name: 'Premium',
     description: 'Ultimate toolkit for content marketing teams',
@@ -55,7 +50,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'API access',
       'Custom workflow integrations',
     ],
-  },
+  },*/
 ];
 
 // The product IDs in Stripe that correspond to our subscription tiers
