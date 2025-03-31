@@ -6,7 +6,8 @@ export default authMiddleware({
     "/sign-in(.*)",
     "/sign-up(.*)", 
     "/api/webhooks/stripe(.*)", 
-    "/api/stripe/checkout(.*)"
+    "/api/stripe/checkout(.*)",
+    "/",
   ],
   ignoredRoutes: [
     "/api/webhooks/stripe",

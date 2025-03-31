@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, createContext } from "react"
 import React from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, AlertCircle, Twitter, Instagram, Linkedin, Mail, Sparkles, Settings, LinkIcon, SmilePlus } from "lucide-react"
+import { Loader2, AlertCircle, Twitter, Instagram, Linkedin, Mail, Sparkles, Settings, LinkIcon, SmilePlus, UserPlus } from "lucide-react"
 import { generateContent, fetchArticleContent } from "@/lib/generate-content"
 import { countWords } from "@/lib/utils"
 import OutputCard from "@/components/output-card"
@@ -16,6 +16,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
 import { UsageDisplay } from "@/components/usage-display"
+import { useUser } from "@clerk/nextjs"
+import Link from "next/link"
 
 // Define tone options
 const toneOptions = [
@@ -35,21 +37,34 @@ const DEFAULT_LIMITS = {
   email: 500,
 }
 
-// Add onContentGenerated to the component props
-interface MainProps {
-  onContentGenerated?: () => void;
-}
-
-// Create a context for sharing generation data across components
-export const GenerationContext = React.createContext<{
-  latestGeneration: any | null;
+// Define the GenerationContextType
+type GenerationContextType = {
+  latestGeneration: any;
   addGeneration: (generation: any) => void;
-}>({
+};
+
+// Export the context so other components can use it
+export const GenerationContext = createContext<GenerationContextType>({
   latestGeneration: null,
   addGeneration: () => {},
 });
 
+// Custom hook for history refresh - properly implemented before the component
+export const useHistoryRefresh = () => {
+  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
+  return { historyRefreshTrigger, setHistoryRefreshTrigger };
+};
+
+// Define the MainProps interface
+interface MainProps {
+  onContentGenerated?: () => void;
+}
+
 export default function Main({ onContentGenerated }: MainProps) {
+  // Add authentication check using Clerk
+  const { isLoaded, isSignedIn, user } = useUser();
+  
+  // All state declarations
   const [content, setContent] = useState("")
   const [articleUrl, setArticleUrl] = useState("")
   const [outputs, setOutputs] = useState<{
@@ -69,25 +84,53 @@ export default function Main({ onContentGenerated }: MainProps) {
     linkedin: false,
     email: false,
   })
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [isFetchingArticle, setIsFetchingArticle] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isFetchingArticle, setIsFetchingArticle] = useState(false);
   const [activeTab, setActiveTab] = useState("twitter")
   const [selectedTone, setSelectedTone] = useState("professional")
   const [customInstructions, setCustomInstructions] = useState("")
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
   const [useEmojis, setUseEmojis] = useState(false)
   const [limits, setLimits] = useState({ ...DEFAULT_LIMITS })
-  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0)
-
-  // When a generation is successful, we want to share it with the history list
-  const [latestGeneratedItem, setLatestGeneratedItem] = useState<any>(null)
-
+  const [latestGeneratedItem, setLatestGeneratedItem] = useState<{
+    id: string;
+    platform: string;
+    character_count: number;
+    title: string;
+    content_snippet: string;
+    content: string;
+    created_at: string;
+    isTemporary?: boolean;
+  } | null>(null);
+  
   const wordCount = countWords(content)
   const isOverLimit = wordCount > limits.input
 
   // Check if at least one platform is selected
   const hasSelectedPlatform = Object.values(selectedPlatforms).some((value) => value)
+  
+  // Display error message if there is one
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null);
+      }, 5000); // Clear error after 5 seconds
+      
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
+  // Expose the latest generation for history list to use
+  useEffect(() => {
+    if (latestGeneratedItem) {
+      // Reset after a short delay to avoid duplicate insertions
+      const timer = setTimeout(() => {
+        setLatestGeneratedItem(null)
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [latestGeneratedItem])
 
   // Get the first selected platform for default tab
   const getFirstSelectedPlatform = () => {
@@ -106,8 +149,26 @@ export default function Main({ onContentGenerated }: MainProps) {
     }
   }
 
-  // Fetch article content
+  // Reset limits to defaults
+  const resetLimits = () => {
+    setLimits({ ...DEFAULT_LIMITS })
+  }
+
+  // Handle platform selection
+  const handlePlatformChange = (platform: keyof typeof selectedPlatforms) => {
+    setSelectedPlatforms((prev) => ({
+      ...prev,
+      [platform]: !prev[platform],
+    }))
+  }
+
+  // Fetch article content with auth check
   async function handleFetchArticle() {
+    if (!isSignedIn) {
+      setError("Please sign in to fetch article content")
+      return
+    }
+    
     if (!articleUrl.trim()) {
       setError("Please enter a valid URL")
       return
@@ -127,7 +188,13 @@ export default function Main({ onContentGenerated }: MainProps) {
     }
   }
 
+  // Generate content with auth check
   async function handleGenerate() {
+    if (!isSignedIn) {
+      setError("Please sign in to generate content")
+      return
+    }
+    
     if (!content.trim()) {
       setError("Please enter some content to repurpose")
       return
@@ -201,35 +268,62 @@ export default function Main({ onContentGenerated }: MainProps) {
     }
   }
 
-  // Expose the latest generation for history list to use
-  useEffect(() => {
-    if (latestGeneratedItem) {
-      // Reset after a short delay to avoid duplicate insertions
-      const timer = setTimeout(() => {
-        setLatestGeneratedItem(null)
-      }, 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [latestGeneratedItem])
-
-  // Handle platform selection
-  const handlePlatformChange = (platform: keyof typeof selectedPlatforms) => {
-    setSelectedPlatforms((prev) => ({
-      ...prev,
-      [platform]: !prev[platform],
-    }))
-  }
-
-  // Reset limits to defaults
-  const resetLimits = () => {
-    setLimits({ ...DEFAULT_LIMITS })
-  }
-
   // Get generated platforms
   const generatedPlatforms = Object.entries(outputs)
     .filter(([platform, content]) => content && selectedPlatforms[platform as keyof typeof selectedPlatforms])
     .map(([platform]) => platform)
 
+  // Show authentication message if user is not signed in
+  if (isLoaded && !isSignedIn) {
+    return (
+      <div className="space-y-6 mb-10">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold">Ready, set, Go!</h1>
+          <p className="text-muted-foreground mt-1">
+            Condense already existing articles into platform-optimized social media captions and email snippets
+          </p>
+        </div>
+        
+        <Card className="border-2">
+          <CardHeader>
+            <CardTitle>Authentication Required</CardTitle>
+            <CardDescription>
+              You need to create an account or sign in to use the content repurposing tool
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col items-center justify-center p-8 text-center">
+              <UserPlus className="h-12 w-12 text-primary mb-4" />
+              <h3 className="text-xl font-semibold mb-2">Sign in to Get Started</h3>
+              <p className="text-muted-foreground mb-6">
+                Create an account to generate platform-optimized content for your social media and emails.
+              </p>
+              <div className="flex gap-4">
+                <Button asChild>
+                  <Link href="/sign-in">Sign In</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/sign-up">Create Account</Link>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // If authentication is still loading, show a loading state
+  if (!isLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2">Loading...</span>
+      </div>
+    );
+  }
+
+  // Original component render for authenticated users
   return (
     <GenerationContext.Provider
       value={{
@@ -481,10 +575,11 @@ export default function Main({ onContentGenerated }: MainProps) {
             </CardContent>
           </Card>
         </div>
-
+        
+        {/* Disable the generate button if user is not signed in */}
         <Button
           onClick={handleGenerate}
-          disabled={isGenerating || isOverLimit || !content.trim() || !hasSelectedPlatform}
+          disabled={isGenerating || isOverLimit || !content.trim() || !hasSelectedPlatform || !isSignedIn}
           className="w-full py-6 text-lg"
         >
           {isGenerating ? (
@@ -553,11 +648,5 @@ export default function Main({ onContentGenerated }: MainProps) {
         )}
       </div>
     </GenerationContext.Provider>
-  )
+  );
 }
-
-// Export the history refresh trigger so the sidebar can access it
-export const useHistoryRefresh = () => {
-  return { historyRefreshTrigger: useState(0)[0], setHistoryRefreshTrigger: useState(0)[1] };
-};
-
