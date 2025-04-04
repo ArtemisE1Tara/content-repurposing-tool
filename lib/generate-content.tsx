@@ -2,7 +2,7 @@
 
 import { extract } from "@extractus/article-extractor"
 import { OpenAI } from "openai"
-import { trackGeneration, getUserUsageStats } from "@/lib/memberships"
+import { trackGeneration, getUserUsageStats, canUserGenerateContent } from "@/lib/memberships"
 
 type PlatformSelection = {
   twitter: boolean
@@ -143,8 +143,9 @@ export async function generateContent(
 ): Promise<Record<string, string | any>> {
   // Check if user has reached their generation limit
   try {
-    const stats = await getUserUsageStats();
-    if (stats.isOverLimit) {
+    // Use the dedicated function to check if user can generate content
+    const canGenerate = await canUserGenerateContent();
+    if (!canGenerate) {
       throw new Error("You've reached your daily generation limit. Please upgrade your plan to continue generating content.");
     }
   } catch (error: any) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import { Progress } from "@/components/ui/progress";
 import { getUserUsageStats } from "@/lib/memberships";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronUp, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { GenerationContext } from "@/components/content-repurposing-tool";
 
 export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
   const [loading, setLoading] = useState(true);
@@ -15,6 +16,9 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [formattedDate, setFormattedDate] = useState<string>("");
+  
+  // Access the latest generation from context
+  const { latestGeneration } = useContext(GenerationContext);
 
   const formatCurrentDate = () => {
     const now = new Date();
@@ -40,11 +44,42 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
     }
   };
 
+  // Initial fetch and hourly refresh
   useEffect(() => {
     fetchUsage();
     const interval = setInterval(fetchUsage, 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+  
+  // Update usage count immediately when a new generation is created
+  useEffect(() => {
+    if (latestGeneration && usage) {
+      // Only increment if this is a new generation (not already counted)
+      if (!latestGeneration.isCounted) {
+        // Create a new updated usage object
+        const updatedUsage = {
+          ...usage,
+          generationsThisDay: usage.generationsThisDay + 1,
+          remainingGenerationsToday: Math.max(0, usage.remainingGenerationsToday - 1),
+          percentUsed: Math.min(100, Math.round(((usage.generationsThisDay + 1) / usage.dailyLimit) * 100)),
+          isOverLimit: usage.generationsThisDay + 1 >= usage.dailyLimit
+        };
+        
+        // Update state with new count
+        setUsage(updatedUsage);
+        
+        // Mark the generation as counted in the context
+        if (latestGeneration.isTemporary) {
+          latestGeneration.isCounted = true;
+        }
+        
+        // Fetch actual data after a short delay to ensure DB is updated
+        setTimeout(() => {
+          fetchUsage();
+        }, 2000);
+      }
+    }
+  }, [latestGeneration, usage]);
 
   if (loading || error || !usage) {
     return null;

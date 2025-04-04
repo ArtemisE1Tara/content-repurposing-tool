@@ -2,13 +2,29 @@
 
 import { useEffect, useState, useContext } from 'react';
 import { HistoryItem } from './history-item';
-import { Loader2, Clock, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react';
+import { Loader2, Clock, ChevronDown, ChevronRight, RefreshCw, History, Trash2, MoreVertical } from 'lucide-react';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
-import { getUserGenerationHistory } from '@/lib/memberships';
+import { getUserGenerationHistory, deleteAllGenerations } from '@/lib/memberships';
 import { cn } from '@/lib/utils';
 import { Badge } from './ui/badge';
 import { GenerationContext } from './content-repurposing-tool';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: boolean, refreshTrigger?: number }) {
   const [history, setHistory] = useState<any[]>([]);
@@ -16,6 +32,8 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
+  const [showClearDialog, setShowClearDialog] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   
   // Access the latest generation from context
   const { latestGeneration } = useContext(GenerationContext);
@@ -54,6 +72,8 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
       (latestGeneration.isTemporary && item.content === latestGeneration.content) || 
       item.id === latestGeneration.id
     )) {
+      console.log("Adding new generation to history:", latestGeneration);
+      
       // Add the new generation to the top of the history list
       setHistory(prev => [latestGeneration, ...prev]);
       
@@ -65,6 +85,28 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
       }
     }
   }, [latestGeneration]);
+
+  const handleClearAll = () => {
+    setShowClearDialog(true);
+  };
+
+  const confirmClearAll = async () => {
+    try {
+      setIsClearing(true);
+      await deleteAllGenerations();
+      setHistory([]);
+    } catch (err) {
+      console.error('Failed to clear history:', err);
+    } finally {
+      setIsClearing(false);
+      setShowClearDialog(false);
+    }
+  };
+
+  const handleDeleteItem = (id: string) => {
+    // Update UI immediately for responsiveness
+    setHistory(prev => prev.filter(item => item.id !== id));
+  };
 
   const hasHistory = history.length > 0;
 
@@ -150,21 +192,49 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
           }
         </Button>
         
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="h-7 w-7" 
-          onClick={() => fetchHistory(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-          <span className="sr-only">Refresh</span>
-        </Button>
-      {history.length > 0 && (
-        <Badge variant="secondary" className="ml-5 text-[11px] px-1.5 py-0 h-auto inline-flex">
-          {history.length} item{history.length !== 1 ? 's' : ''}
-        </Badge>
-      )}
+        <div className="flex items-center gap-0.1">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-7 w-7" 
+            onClick={() => fetchHistory(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            <span className="sr-only">Refresh</span>
+          </Button>
+
+          {history.length > 0 && (
+            <Badge variant="secondary" className="text-[11px] px-1.5 py-0 h-auto inline-flex">
+              {history.length} item{history.length !== 1 ? 's' : ''}
+            </Badge>
+          )}
+          
+          {history.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={isClearing}
+                >
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem 
+                  className="text-destructive focus:text-destructive"
+                  onClick={handleClearAll}
+                  disabled={isClearing}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  Clear All
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
 
       {expanded && (
@@ -181,6 +251,7 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
                   created_at={item.created_at}
                   collapsed={false}
                   isTemporary={item.isTemporary}
+                  onDelete={() => handleDeleteItem(item.id)}
                 />
               ))}
             </div>
@@ -189,6 +260,34 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
           <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background to-transparent pointer-events-none" />
         </div>
       )}
+
+      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear All History</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete all {history.length} generation{history.length !== 1 ? 's' : ''}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isClearing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmClearAll}
+              disabled={isClearing}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isClearing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Clearing...
+                </>
+              ) : (
+                'Clear All'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

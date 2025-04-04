@@ -124,6 +124,9 @@ export async function trackGeneration(platform: string, characterCount: number, 
     
     console.log('📝 Prepared metadata:', { title, snippetLength: snippet.length });
     
+    // First, increment the daily usage count - this happens regardless of generation success
+    await incrementDailyUsageCount(user.id);
+    
     // Create the record to insert
     const record = {
       user_id: user.id,
@@ -139,7 +142,8 @@ export async function trackGeneration(platform: string, characterCount: number, 
     // Try a direct insert with simpler error handling first
     const { data, error } = await supabase
       .from('generations')
-      .insert([record]);
+      .insert([record])
+      .select(); // Add .select() to return the inserted record
       
     if (error) {
       console.error('❌ Database insert error:', error);
@@ -165,6 +169,62 @@ export async function trackGeneration(platform: string, characterCount: number, 
   } catch (err: any) {
     console.error('❌ Error in trackGeneration:', err);
     return null; // Don't throw here, just return null to prevent the main flow from breaking
+  }
+}
+
+// Helper function to increment daily usage count
+async function incrementDailyUsageCount(userId: string) {
+  try {
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Check if we already have a record for this user and date
+    const { data: existingRecord, error: fetchError } = await supabase
+      .from('daily_usage')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single();
+    
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error checking daily usage:', fetchError);
+      throw new Error("Failed to check daily usage");
+    }
+    
+    if (existingRecord) {
+      // Record exists, increment count
+      const { error: updateError } = await supabase
+        .from('daily_usage')
+        .update({ 
+          count: existingRecord.count + 1,
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', existingRecord.id);
+        
+      if (updateError) {
+        console.error('Error updating daily usage:', updateError);
+        throw new Error("Failed to update daily usage");
+      }
+    } else {
+      // No record exists for today, create new one
+      const { error: insertError } = await supabase
+        .from('daily_usage')
+        .insert([{
+          user_id: userId,
+          date: today,
+          count: 1
+        }]);
+        
+      if (insertError) {
+        console.error('Error creating daily usage record:', insertError);
+        throw new Error("Failed to create daily usage record");
+      }
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Failed to track daily usage:', err);
+    return false;
   }
 }
 
@@ -225,7 +285,42 @@ export async function getGenerationById(id: string) {
   return data;
 }
 
-// Simplify usage stats to only use daily metrics
+// Delete a specific generation by ID
+export async function deleteGenerationById(id: string) {
+  const user = await getCurrentUser();
+  
+  const { error } = await supabase
+    .from('generations')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id);
+    
+  if (error) {
+    console.error('Error deleting generation:', error);
+    throw new Error("Failed to delete generation");
+  }
+  
+  return { success: true };
+}
+
+// Delete all generations for the current user
+export async function deleteAllGenerations() {
+  const user = await getCurrentUser();
+  
+  const { error } = await supabase
+    .from('generations')
+    .delete()
+    .eq('user_id', user.id);
+    
+  if (error) {
+    console.error('Error deleting all generations:', error);
+    throw new Error("Failed to delete all generations");
+  }
+  
+  return { success: true };
+}
+
+// Update usage stats to use the dedicated daily_usage table
 export async function getUserUsageStats() {
   const user = await getCurrentUser();
   const subscription = await getUserSubscription();
@@ -234,26 +329,27 @@ export async function getUserUsageStats() {
     throw new Error("User subscription not found");
   }
   
-  // Get start of today (midnight)
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  // Get today's date in YYYY-MM-DD format
+  const today = new Date().toISOString().split('T')[0];
   
-  // Count generations for current day
-  const { data: generations, error } = await supabase
-    .from('generations')
-    .select('*', { count: 'exact' })
+  // Get daily usage count from the dedicated table
+  const { data: usageRecord, error: usageError } = await supabase
+    .from('daily_usage')
+    .select('count')
     .eq('user_id', user.id)
-    .gte('created_at', startOfDay);
+    .eq('date', today)
+    .single();
     
-  if (error) {
-    console.error('Error counting generations:', error);
+  if (usageError && usageError.code !== 'PGRST116') {
+    console.error('Error fetching daily usage:', usageError);
     throw new Error("Failed to get usage statistics");
   }
 
   // Use daily limit directly from the subscription tier
   const dailyLimit = subscription.tier.daily_generation_limit;
   
-  const generationsThisDay = generations.length;
+  // If no record exists for today, count is 0
+  const generationsThisDay = usageRecord ? usageRecord.count : 0;
   const percentUsed = Math.min(100, Math.round((generationsThisDay / dailyLimit) * 100));
   const remainingGenerationsToday = Math.max(0, dailyLimit - generationsThisDay);
   const isOverLimit = generationsThisDay >= dailyLimit;
@@ -266,6 +362,18 @@ export async function getUserUsageStats() {
     isOverLimit,
     subscription
   };
+}
+
+// Validate if the user can generate content based on their usage limits
+export async function canUserGenerateContent() {
+  try {
+    const stats = await getUserUsageStats();
+    return !stats.isOverLimit;
+  } catch (err) {
+    console.error('Error checking if user can generate content:', err);
+    // Default to allowing generation if we can't check limits (better UX)
+    return true;
+  }
 }
 
 // Get all subscription tiers
