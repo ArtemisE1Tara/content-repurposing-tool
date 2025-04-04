@@ -1,32 +1,32 @@
-import { ThemeProvider } from "@/components/theme-provider"
-import "./globals.css"
+import { ClerkProvider } from "@clerk/nextjs";
+import { ThemeProvider } from "next-themes";
 import { Inter as FontSans } from "next/font/google"
-import { ClerkProvider } from '@clerk/nextjs'
+import "./globals.css";
 
-// Load Inter as the main font
 const fontSans = FontSans({
   subsets: ["latin"],
   variable: "--font-sans",
 })
 
 export const metadata = {
-  title: "Contentful.AI",
-  description: "Condense already existing articles into platform-optimized social media captions and email snippets using the latest AI technology.",
-}
+  title: "Content Repurposing Tool",
+  description: "Instantly repurpose your content for social media, emails, and more with AI.",
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
-        <head />
         <body className={`antialiased ${fontSans.variable}`}>
-          <ThemeProvider>{children}</ThemeProvider>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            {children}
+          </ThemeProvider>
         </body>
       </html>
     </ClerkProvider>
-  )
+  );
 }

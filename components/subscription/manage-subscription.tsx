@@ -55,12 +55,7 @@ export function ManageSubscription({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Your {tier.charAt(0).toUpperCase() + tier.slice(1)} Subscription</CardTitle>
-        <CardDescription>
-          Manage your subscription settings
-        </CardDescription>
-      </CardHeader>
+      <br></br>
       <CardContent>
         <div className="space-y-4">
           <div>

@@ -14,6 +14,17 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
   const [usage, setUsage] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [formattedDate, setFormattedDate] = useState<string>("");
+
+  const formatCurrentDate = () => {
+    const now = new Date();
+    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+    return now.toLocaleDateString('en-US', options);
+  };
+
+  useEffect(() => {
+    setFormattedDate(formatCurrentDate());
+  }, []);
 
   const fetchUsage = async () => {
     try {
@@ -70,7 +81,7 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
                   )}
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  {usage.generationsThisDay}/{usage.dailyLimit}
+                  {usage.generationsThisDay}/{usage.dailyLimit} • {formattedDate}
                 </span>
               </div>
             </Link>
@@ -122,7 +133,7 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
         <div className="mt-2 space-y-1 text-xs">
           <p className="flex justify-between">
             <span className="text-muted-foreground">Used today:</span>
-            <span>{usage.generationsThisDay} generations</span>
+            <span>{usage.generationsThisDay} generation</span>
           </p>
           <p className="flex justify-between">
             <span className="text-muted-foreground">Daily limit:</span>

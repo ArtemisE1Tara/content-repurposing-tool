@@ -5,11 +5,13 @@ import { ManageSubscription } from "@/components/subscription/manage-subscriptio
 import { useSubscription } from "@/hooks/use-subscription";
 import { useSubscriptionPlans } from "@/hooks/use-subscription-plans";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CheckCircle2, XCircle } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function MembershipPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [showSuccess, setShowSuccess] = useState(false);
   const [showCanceled, setShowCanceled] = useState(false);
@@ -39,6 +41,17 @@ export default function MembershipPage() {
 
   return (
     <div className="container mx-auto py-6">
+      <div className="flex items-center mb-6">
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="mr-4 gap-1"
+          onClick={() => router.push("/dashboard")}
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+        </Button>
+      </div>
+      
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Membership</h1>
         <p className="text-muted-foreground">

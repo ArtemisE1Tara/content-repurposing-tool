@@ -8,6 +8,9 @@ export default authMiddleware({
     "/api/webhooks/stripe(.*)", 
     "/api/stripe/checkout(.*)",
     "/",
+    "/privacy",
+    "/terms",
+    "/contact",
   ],
   ignoredRoutes: [
     "/api/webhooks/stripe",
