@@ -29,19 +29,19 @@ const buttonVariants = cva(
     compoundVariants: [
       {
         variant: "default",
-        className: "midnight-purple:hover:bg-primary/80 dark-topaz:hover:bg-primary/80 glass:backdrop-blur-md glass:bg-primary/85 glass:hover:bg-primary/70",
+        className: "midnight-purple:hover:bg-primary/80 dark-topaz:hover:bg-primary/80 glass:backdrop-blur-md glass:bg-primary/85 glass:hover:bg-primary/70 glass:transform glass:translate-y-[-1px] glass:transition-all glass:duration-300 glass:hover:translate-y-[-3px] glass:hover:shadow-lg glass:perspective-1000 glass:hover:rotate-x-1",
       },
       {
         variant: "outline", 
-        className: "midnight-purple:hover:bg-accent midnight-purple:hover:text-accent-foreground dark-topaz:hover:bg-accent dark-topaz:hover:text-accent-foreground glass:backdrop-blur-md glass:border-white/20 glass:hover:bg-accent/40",
+        className: "midnight-purple:hover:bg-accent midnight-purple:hover:text-accent-foreground dark-topaz:hover:bg-accent dark-topaz:hover:text-accent-foreground glass:backdrop-blur-md glass:border-white/25 glass:hover:bg-white/40 glass:transform glass:translate-y-[-1px] glass:hover:translate-y-[-3px] glass:shadow-sm glass:hover:shadow-md",
       },
       {
         variant: "secondary",
-        className: "glass:backdrop-blur-md glass:bg-secondary/85 glass:hover:bg-secondary/70"
+        className: "glass:backdrop-blur-md glass:bg-white/50 glass:hover:bg-white/60 glass:border-white/25 glass:transform glass:translate-y-[-1px] glass:hover:translate-y-[-3px]"
       },
       {
         variant: "ghost",
-        className: "glass:hover:bg-muted/50 glass:hover:backdrop-blur-lg"
+        className: "glass:hover:bg-white/30 glass:hover:backdrop-blur-lg glass:hover:shadow-sm"
       },
     ],
     defaultVariants: {
