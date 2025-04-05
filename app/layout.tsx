@@ -1,5 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "next-themes";
+import { dark } from "@clerk/themes";
 import { Inter as FontSans } from "next/font/google"
 import "./globals.css";
 
@@ -19,10 +20,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        baseTheme: dark,
+      }}
+    >
       <html lang="en" suppressHydrationWarning>
         <body className={`antialiased ${fontSans.variable}`}>
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <ThemeProvider 
+            attribute="class" 
+            defaultTheme="system" 
+            enableSystem
+            themes={["light", "dark", "midnight-purple", "dark-topaz", "glass"]}
+          >
             {children}
           </ThemeProvider>
         </body>

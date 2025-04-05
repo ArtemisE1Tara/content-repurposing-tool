@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useContext } from 'react';
+import { useEffect, useState, useContext, useCallback } from 'react';
 import { HistoryItem } from './history-item';
 import { Loader2, Clock, ChevronDown, ChevronRight, RefreshCw, History, Trash2, MoreVertical } from 'lucide-react';
 import { Button } from './ui/button';
@@ -35,10 +35,10 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   
-  // Access the latest generation from context
-  const { latestGeneration } = useContext(GenerationContext);
+  // Access the improved context
+  const { latestGeneration, refreshTimestamp } = useContext(GenerationContext);
 
-  const fetchHistory = async (isRefresh = false) => {
+  const fetchHistory = useCallback(async (isRefresh = false) => {
     try {
       isRefresh ? setRefreshing(true) : setLoading(true);
       const data = await getUserGenerationHistory(20);
@@ -51,19 +51,19 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   // Fetch initially
   useEffect(() => {
     fetchHistory();
-  }, []);
+  }, [fetchHistory]);
 
-  // Refresh when refreshTrigger changes
+  // Refresh when refreshTrigger or refreshTimestamp changes
   useEffect(() => {
-    if (refreshTrigger > 0) {
+    if (refreshTrigger > 0 || refreshTimestamp > 0) {
       fetchHistory(true);
     }
-  }, [refreshTrigger]);
+  }, [refreshTrigger, refreshTimestamp, fetchHistory]);
 
   // When we get a new generation, add it to the history immediately
   useEffect(() => {
@@ -72,19 +72,18 @@ export function HistoryList({ collapsed, refreshTrigger = 0 }: { collapsed: bool
       (latestGeneration.isTemporary && item.content === latestGeneration.content) || 
       item.id === latestGeneration.id
     )) {
-      console.log("Adding new generation to history:", latestGeneration);
-      
       // Add the new generation to the top of the history list
       setHistory(prev => [latestGeneration, ...prev]);
       
       // If this was a temporary item, refresh to get the real data after a delay
       if (latestGeneration.isTemporary) {
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           fetchHistory(true);
         }, 1500);
+        return () => clearTimeout(timer);
       }
     }
-  }, [latestGeneration]);
+  }, [latestGeneration, history, fetchHistory]);
 
   const handleClearAll = () => {
     setShowClearDialog(true);

@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@clerk/nextjs": "^4.31.8",
+    "@clerk/themes": "^2.2.27",
     "@emotion/is-prop-valid": "latest",
     "@extractus/article-extractor": "latest",
     "@hookform/resolvers": "^3.9.1",

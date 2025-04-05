@@ -1,20 +1,34 @@
 import * as React from "react"
-
 import { cn } from "@/lib/utils"
+import { useTheme } from "next-themes"
 
 const Card = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      "rounded-lg border bg-card text-card-foreground shadow-sm",
-      className
-    )}
-    {...props}
-  />
-))
+>(({ className, ...props }, ref) => {
+  const { theme } = useTheme();
+  const isGlass = theme === "glass";
+  
+  return (
+    <div
+      ref={ref}
+      className={cn(
+        "rounded-lg border bg-card text-card-foreground shadow-sm",
+        isGlass && "backdrop-blur-md border-white/20 bg-white/20 shadow-lg",
+        isGlass && "transform-gpu translate-z-10 perspective-[1000px]",
+        isGlass && "hover:translate-z-20 transition-all duration-300",
+        className
+      )}
+      style={isGlass ? {
+        background: "linear-gradient(135deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1))",
+        boxShadow: "rgba(50, 50, 93, 0.25) 0px 13px 27px -5px, rgba(0, 0, 0, 0.2) 0px 8px 16px -8px",
+        transformStyle: "preserve-3d",
+        transform: "translateZ(20px)"
+      } : undefined}
+      {...props}
+    />
+  )
+})
 Card.displayName = "Card"
 
 const CardHeader = React.forwardRef<

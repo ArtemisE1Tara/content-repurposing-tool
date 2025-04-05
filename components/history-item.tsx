@@ -1,10 +1,11 @@
 import { formatDistanceToNow } from 'date-fns';
 import { Button } from '@/components/ui/button';
-import { Copy, Loader2, MoreVertical, Trash2 } from 'lucide-react';
+import { Copy, Loader2, MoreVertical, Trash2, Cpu, BrainCircuit } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { getGenerationById, deleteGenerationById } from '@/lib/memberships';
 import { GenerationModal } from './generation-modal';
+import { useTheme } from "next-themes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ type HistoryItemProps = {
   created_at: string;
   collapsed: boolean;
   isTemporary?: boolean;
+  model?: string; // Add model property
   onDelete?: () => void;
 }
 
@@ -49,13 +51,16 @@ const sanitizeMarkdown = (text: string): string => {
     .trim();
 };
 
-export function HistoryItem({ id, platform, title, snippet, created_at, collapsed, isTemporary, onDelete }: HistoryItemProps) {
+export function HistoryItem({ 
+  id, platform, title, snippet, created_at, collapsed, isTemporary, model, onDelete 
+}: HistoryItemProps) {
   const [copied, setCopied] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [generation, setGeneration] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const { theme } = useTheme();
   
   const timeAgo = formatDistanceToNow(new Date(created_at), { addSuffix: true });
   
@@ -107,23 +112,97 @@ export function HistoryItem({ id, platform, title, snippet, created_at, collapse
     }
   };
 
-  // Get platform icon and color
+  // Get platform icon and color - updated to be theme-aware
   const getPlatformDetails = (platform: string) => {
-    switch (platform.toLowerCase()) {
-      case 'twitter':
-        return { color: 'text-blue-500', icon: '𝕏', bgColor: 'bg-blue-50 dark:bg-blue-950' };
-      case 'instagram':
-        return { color: 'text-pink-500', icon: '📷', bgColor: 'bg-pink-50 dark:bg-pink-950' };
-      case 'linkedin':
-        return { color: 'text-blue-700', icon: '💼', bgColor: 'bg-blue-50 dark:bg-blue-950' };
-      case 'email':
-        return { color: 'text-green-500', icon: '✉️', bgColor: 'bg-green-50 dark:bg-green-950' };
-      default:
-        return { color: 'text-slate-500', icon: '📄', bgColor: 'bg-slate-50 dark:bg-slate-900' };
-    }
+    const platformKey = platform.toLowerCase();
+    
+    // Base styles for different themes
+    let baseStyles: Record<string, Record<string, { color: string; bgColor: string }>> = {
+      light: {
+        twitter: { color: 'text-blue-500', bgColor: 'bg-blue-50' },
+        instagram: { color: 'text-pink-500', bgColor: 'bg-pink-50' },
+        linkedin: { color: 'text-blue-700', bgColor: 'bg-blue-50' },
+        email: { color: 'text-green-500', bgColor: 'bg-green-50' },
+        default: { color: 'text-slate-500', bgColor: 'bg-slate-50' }
+      },
+      dark: {
+        twitter: { color: 'text-blue-400', bgColor: 'bg-blue-950/40' },
+        instagram: { color: 'text-pink-400', bgColor: 'bg-pink-950/40' },
+        linkedin: { color: 'text-blue-400', bgColor: 'bg-blue-950/40' },
+        email: { color: 'text-green-400', bgColor: 'bg-green-950/40' },
+        default: { color: 'text-slate-400', bgColor: 'bg-slate-800' }
+      },
+      'midnight-purple': {
+        twitter: { color: 'text-blue-300', bgColor: 'bg-blue-950/30' },
+        instagram: { color: 'text-pink-300', bgColor: 'bg-pink-950/30' },
+        linkedin: { color: 'text-indigo-300', bgColor: 'bg-indigo-950/30' },
+        email: { color: 'text-purple-300', bgColor: 'bg-purple-950/30' },
+        default: { color: 'text-purple-300', bgColor: 'bg-purple-950/20' }
+      },
+      'dark-topaz': {
+        twitter: { color: 'text-amber-300', bgColor: 'bg-blue-950/20' },
+        instagram: { color: 'text-amber-300', bgColor: 'bg-pink-950/20' },
+        linkedin: { color: 'text-amber-300', bgColor: 'bg-indigo-950/20' },
+        email: { color: 'text-amber-300', bgColor: 'bg-green-950/20' },
+        default: { color: 'text-amber-300', bgColor: 'bg-amber-950/20' }
+      }
+    };
+    
+    // Choose theme styles (fallback to light theme)
+    const themeStyles = baseStyles[theme as keyof typeof baseStyles] || baseStyles.light;
+    
+    // Get the platform-specific styles (fallback to default)
+    const styles = themeStyles[platformKey] || themeStyles.default;
+    
+    // Get the platform icon
+    let icon = '📄'; // Default icon
+    if (platformKey === 'twitter') icon = '𝕏';
+    else if (platformKey === 'instagram') icon = '📷';
+    else if (platformKey === 'linkedin') icon = '💼';
+    else if (platformKey === 'email') icon = '✉️';
+    
+    return { 
+      color: styles.color, 
+      bgColor: styles.bgColor, 
+      icon 
+    };
   };
   
   const { color, icon, bgColor } = getPlatformDetails(platform);
+
+  // Get model icon with theme-aware colors
+  const getModelIcon = () => {
+    if (!model) return null;
+    
+    // Get theme-specific colors
+    const getIconColor = () => {
+      if (model === "openai") {
+        // OpenAI blue colors
+        switch (theme) {
+          case "midnight-purple": return "text-blue-300";
+          case "dark-topaz": return "text-blue-300";
+          case "dark": return "text-blue-400";
+          default: return "text-blue-500";
+        }
+      } else if (model === "anthropic") {
+        // Claude purple colors
+        switch (theme) {
+          case "midnight-purple": return "text-purple-300";
+          case "dark-topaz": return "text-purple-300";
+          case "dark": return "text-purple-400";
+          default: return "text-purple-500";
+        }
+      }
+      
+      return "text-muted-foreground";
+    };
+    
+    return model === "openai" ? (
+      <Cpu className={`h-3 w-3 ${getIconColor()}`} />
+    ) : model === "anthropic" ? (
+      <BrainCircuit className={`h-3 w-3 ${getIconColor()}`} />
+    ) : null;
+  };
 
   // For collapsed mode, show just the icon with tooltip
   if (collapsed) {
@@ -162,7 +241,14 @@ export function HistoryItem({ id, platform, title, snippet, created_at, collapse
           <div className="flex-1 min-w-0 px-2">
             <p className="text-xs font-medium line-clamp-1">{displayTitle}</p>
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{displaySnippet}</p>
-            <p className="text-[10px] text-muted-foreground/60 mt-1">{timeAgo}</p>
+            <div className="flex items-center mt-1 gap-1">
+              <p className="text-[10px] text-muted-foreground/60">{timeAgo}</p>
+              {getModelIcon() && (
+                <span className="ml-1" title={model === "openai" ? "Generated with GPT-4o" : "Generated with Claude"}>
+                  {getModelIcon()}
+                </span>
+              )}
+            </div>
           </div>
           
           <div className="flex items-center gap-1">

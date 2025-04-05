@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
 import { getUserUsageStats } from "@/lib/memberships";
 import { cn } from "@/lib/utils";
@@ -16,9 +16,9 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [formattedDate, setFormattedDate] = useState<string>("");
-  
-  // Access the latest generation from context
-  const { latestGeneration } = useContext(GenerationContext);
+
+  // Access the improved context
+  const { latestGeneration, refreshTimestamp } = useContext(GenerationContext);
 
   const formatCurrentDate = () => {
     const now = new Date();
@@ -30,7 +30,7 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
     setFormattedDate(formatCurrentDate());
   }, []);
 
-  const fetchUsage = async () => {
+  const fetchUsage = useCallback(async () => {
     try {
       setLoading(true);
       const stats = await getUserUsageStats();
@@ -42,20 +42,27 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Initial fetch and hourly refresh
   useEffect(() => {
     fetchUsage();
     const interval = setInterval(fetchUsage, 60 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
-  
+  }, [fetchUsage]);
+
+  // Refresh when context refreshTimestamp changes
+  useEffect(() => {
+    if (refreshTimestamp > 0) {
+      fetchUsage();
+    }
+  }, [refreshTimestamp, fetchUsage]);
+
   // Update usage count immediately when a new generation is created
   useEffect(() => {
     if (latestGeneration && usage) {
       // Only increment if this is a new generation (not already counted)
-      if (!latestGeneration.isCounted) {
+      if (!latestGeneration.isTemporary || !latestGeneration.isCounted) {
         // Create a new updated usage object
         const updatedUsage = {
           ...usage,
@@ -64,22 +71,18 @@ export function SidebarUsage({ isCollapsed }: { isCollapsed: boolean }) {
           percentUsed: Math.min(100, Math.round(((usage.generationsThisDay + 1) / usage.dailyLimit) * 100)),
           isOverLimit: usage.generationsThisDay + 1 >= usage.dailyLimit
         };
-        
+
         // Update state with new count
         setUsage(updatedUsage);
-        
-        // Mark the generation as counted in the context
-        if (latestGeneration.isTemporary) {
-          latestGeneration.isCounted = true;
-        }
-        
+
         // Fetch actual data after a short delay to ensure DB is updated
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           fetchUsage();
         }, 2000);
+        return () => clearTimeout(timer);
       }
     }
-  }, [latestGeneration, usage]);
+  }, [latestGeneration, usage, fetchUsage]);
 
   if (loading || error || !usage) {
     return null;

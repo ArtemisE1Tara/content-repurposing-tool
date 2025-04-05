@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { ModeToggle } from "./mode-toggle"
 import { UserButton } from "@clerk/nextjs"
 import { HistoryList } from "./history-list"
 import { SidebarUsage } from "./sidebar-usage"
@@ -22,6 +21,7 @@ import {
 import { useState, useEffect } from "react"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface SidebarProps {
   historyRefreshTrigger?: number
@@ -133,25 +133,23 @@ export function Sidebar({ historyRefreshTrigger = 0 }: SidebarProps) {
           {/* User and theme area - fixed at bottom */}
           <div className="p-4 border-t flex-shrink-0">
             <div className={cn(
-              "flex items-center mb-4",
-              isCollapsed ? "justify-center" : "justify-between"
+              "flex items-center gap-3 px-3 py-2",
+              isCollapsed ? "flex-col" : "justify-between"
             )}>
               {mounted && (
-                <UserButton 
-                  afterSignOutUrl="/sign-in"
-                  appearance={{
-                    elements: {
-                      userButtonAvatarBox: "w-8 h-8"
-                    }
-                  }} 
-                />
+                <>
+                  {isCollapsed && <ThemeToggle />}
+                  <UserButton 
+                    afterSignOutUrl="/sign-in"
+                    appearance={{
+                      elements: {
+                        userButtonAvatarBox: "w-8 h-8"
+                      }
+                    }} 
+                  />
+                  {!isCollapsed && <ThemeToggle />}
+                </>
               )}
-              {!isCollapsed && mounted && <span className="text-sm text-muted-foreground">Account</span>}
-            </div>
-            <div className={cn(
-              isCollapsed ? "flex justify-center" : ""
-            )}>
-              {mounted && <ModeToggle />}
             </div>
           </div>
         </div>
@@ -210,7 +208,7 @@ function MobileSidebar({ pathname, historyRefreshTrigger }: { pathname: string, 
       <SidebarUsage isCollapsed={false} />
 
       <div className="p-4 border-t flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between">
           {mounted && (
             <UserButton 
               afterSignOutUrl="/sign-in"
@@ -221,9 +219,8 @@ function MobileSidebar({ pathname, historyRefreshTrigger }: { pathname: string, 
               }} 
             />
           )}
-          {mounted && <span className="text-sm text-muted-foreground">Account</span>}
+          {mounted && <ThemeToggle />}
         </div>
-        {mounted && <ModeToggle />}
       </div>
     </div>
   )

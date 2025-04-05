@@ -20,7 +20,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   },*/
   {
     id: 'pro',
-    name: 'Professional',
+    name: 'Contentful Pro',
     description: 'Advanced features for serious content creators',
     tier: 'pro',
     priceId: '', // Will be populated from Stripe

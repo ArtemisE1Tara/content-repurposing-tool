@@ -26,6 +26,24 @@ const buttonVariants = cva(
         icon: "h-10 w-10",
       },
     },
+    compoundVariants: [
+      {
+        variant: "default",
+        className: "midnight-purple:hover:bg-primary/80 dark-topaz:hover:bg-primary/80 glass:backdrop-blur-md glass:bg-primary/85 glass:hover:bg-primary/70",
+      },
+      {
+        variant: "outline", 
+        className: "midnight-purple:hover:bg-accent midnight-purple:hover:text-accent-foreground dark-topaz:hover:bg-accent dark-topaz:hover:text-accent-foreground glass:backdrop-blur-md glass:border-white/20 glass:hover:bg-accent/40",
+      },
+      {
+        variant: "secondary",
+        className: "glass:backdrop-blur-md glass:bg-secondary/85 glass:hover:bg-secondary/70"
+      },
+      {
+        variant: "ghost",
+        className: "glass:hover:bg-muted/50 glass:hover:backdrop-blur-lg"
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

@@ -108,9 +108,9 @@ export async function getUserSubscription(): Promise<UserSubscription | null> {
 }
 
 // Track a new generation with full content and better error handling
-export async function trackGeneration(platform: string, characterCount: number, content: string) {
+export async function trackGeneration(platform: string, characterCount: number, content: string, model: string = "openai") {
   try {
-    console.log('⏳ Starting to track generation:', { platform, charCount: characterCount, contentLength: content.length });
+    console.log('⏳ Starting to track generation:', { platform, charCount: characterCount, contentLength: content.length, model });
     
     const user = await getCurrentUser();
     console.log('✅ Got current user:', { userId: user.id });
@@ -124,9 +124,6 @@ export async function trackGeneration(platform: string, characterCount: number, 
     
     console.log('📝 Prepared metadata:', { title, snippetLength: snippet.length });
     
-    // First, increment the daily usage count - this happens regardless of generation success
-    await incrementDailyUsageCount(user.id);
-    
     // Create the record to insert
     const record = {
       user_id: user.id,
@@ -134,16 +131,20 @@ export async function trackGeneration(platform: string, characterCount: number, 
       character_count: characterCount,
       title,
       content_snippet: snippet,
-      content  // Store the full content
+      content,  // Store the full content
+      model     // Store the model used for generation
     };
     
     console.log('🔍 Inserting generation into database...');
+    
+    // First, increment the daily usage count - this happens regardless of generation success
+    await incrementDailyUsageCount(user.id);
     
     // Try a direct insert with simpler error handling first
     const { data, error } = await supabase
       .from('generations')
       .insert([record])
-      .select(); // Add .select() to return the inserted record
+      .select(); // Ensure we get the complete record back with ID
       
     if (error) {
       console.error('❌ Database insert error:', error);
@@ -164,7 +165,7 @@ export async function trackGeneration(platform: string, characterCount: number, 
       throw new Error(`Failed to track generation: ${error.message}`);
     }
     
-    console.log('✅ Generation tracked successfully');
+    console.log('✅ Generation tracked successfully, ID:', data?.[0]?.id);
     return data?.[0] || null;
   } catch (err: any) {
     console.error('❌ Error in trackGeneration:', err);
@@ -195,10 +196,7 @@ async function incrementDailyUsageCount(userId: string) {
       // Record exists, increment count
       const { error: updateError } = await supabase
         .from('daily_usage')
-        .update({ 
-          count: existingRecord.count + 1,
-          updated_at: new Date().toISOString() 
-        })
+        .update({ count: existingRecord.count + 1 })
         .eq('id', existingRecord.id);
         
       if (updateError) {
