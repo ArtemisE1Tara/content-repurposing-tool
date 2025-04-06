@@ -252,15 +252,7 @@ export function HistoryItem({
           </div>
           
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={copyToClipboard}
-              title="Copy to clipboard"
-            >
-              <Copy className="h-3 w-3" />
-            </Button>
+            
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

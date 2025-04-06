@@ -41,12 +41,12 @@ const modelProviderOptions = [
 // Get character limit from environment variable with fallback to 6000
 const HARD_CHARACTER_LIMIT = parseInt(process.env.NEXT_PUBLIC_MAX_CHARACTER_LIMIT || '6000', 10);
 
-// Default character limits
+// Default character limits from environment variables
 const DEFAULT_LIMITS = {
-  twitter: 500,
-  instagram: 500,
-  linkedin: 500,
-  email: 500,
+  twitter: parseInt(process.env.NEXT_PUBLIC_DEFAULT_LIMIT_TWITTER || '500', 10),
+  instagram: parseInt(process.env.NEXT_PUBLIC_DEFAULT_LIMIT_INSTAGRAM || '2200', 10),
+  linkedin: parseInt(process.env.NEXT_PUBLIC_DEFAULT_LIMIT_LINKEDIN || '3000', 10),
+  email: parseInt(process.env.NEXT_PUBLIC_DEFAULT_LIMIT_EMAIL || '300', 10),
 }
 
 // Define the GenerationContext with a more reliable update mechanism
@@ -668,25 +668,41 @@ export default function Main({ onContentGenerated }: MainProps) {
 
                 {selectedPlatforms.twitter && outputs.twitter && (
                   <TabsContent value="twitter">
-                    <OutputCard title="X Post" content={outputs.twitter} maxLength={limits.twitter} />
+                    <OutputCard 
+                      title={`X Post (${limits.twitter} char limit)`} 
+                      content={outputs.twitter} 
+                      maxLength={limits.twitter} 
+                    />
                   </TabsContent>
                 )}
 
                 {selectedPlatforms.instagram && outputs.instagram && (
                   <TabsContent value="instagram">
-                    <OutputCard title="Instagram Caption" content={outputs.instagram} maxLength={limits.instagram} />
+                    <OutputCard 
+                      title={`Instagram Caption (${limits.instagram} char limit)`} 
+                      content={outputs.instagram} 
+                      maxLength={limits.instagram} 
+                    />
                   </TabsContent>
                 )}
 
                 {selectedPlatforms.linkedin && outputs.linkedin && (
                   <TabsContent value="linkedin">
-                    <OutputCard title="LinkedIn Post" content={outputs.linkedin} maxLength={limits.linkedin} />
+                    <OutputCard 
+                      title={`LinkedIn Post (${limits.linkedin} char limit)`} 
+                      content={outputs.linkedin} 
+                      maxLength={limits.linkedin} 
+                    />
                   </TabsContent>
                 )}
 
                 {selectedPlatforms.email && outputs.email && (
                   <TabsContent value="email">
-                    <OutputCard title="Email Snippet" content={outputs.email} maxLength={limits.email} />
+                    <OutputCard 
+                      title={`Email Snippet (${limits.email} char limit)`} 
+                      content={outputs.email} 
+                      maxLength={limits.email} 
+                    />
                   </TabsContent>
                 )}
               </Tabs>

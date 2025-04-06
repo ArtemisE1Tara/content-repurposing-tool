@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
-import { SunIcon, MoonIcon, MonitorIcon, Sparkles, FlameIcon, GlassWater } from "lucide-react"
+import { SunIcon, MoonIcon, MonitorIcon, Sparkles, FlameIcon } from "lucide-react"
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
@@ -32,7 +32,6 @@ export function ThemeToggle() {
           {theme === "dark" && <MoonIcon className="h-5 w-5" />}
           {theme === "midnight-purple" && <Sparkles className="h-5 w-5 text-purple-400" />}
           {theme === "dark-topaz" && <FlameIcon className="h-5 w-5 text-amber-400" />}
-          {theme === "glass" && <GlassWater className="h-5 w-5 text-teal-400" />}
           {theme === "system" && <MonitorIcon className="h-5 w-5" />}
           <span className="sr-only">Toggle theme</span>
         </Button>
@@ -53,10 +52,6 @@ export function ThemeToggle() {
         <DropdownMenuItem onClick={() => setTheme("dark-topaz")}>
           <FlameIcon className="mr-2 h-4 w-4 text-amber-400" />
           <span>Dark Topaz</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("glass")}>
-          <GlassWater className="mr-2 h-4 w-4 text-teal-400" />
-          <span>Frosted Glass</span>
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setTheme("system")}>
           <MonitorIcon className="mr-2 h-4 w-4" />
