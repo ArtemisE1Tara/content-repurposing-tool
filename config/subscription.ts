@@ -28,7 +28,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     currency: 'USD',
     interval: 'month',
     features: [
-      'Up to 200 generations per day',
+      'Up to 100 generations per day',
     ],
     isPopular: false,
   },
